@@ -38,6 +38,8 @@ class UserContext(BaseModel):
     )
     fuel_type: FuelType | None = None
     transit_cost_per_km_eur: float | None = Field(default=None, ge=0)
+    carrying_capacity_kg: float | None = Field(default=None, gt=0)
+    max_reachable_distance_km: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_mode_specific_fields(self) -> "UserContext":
@@ -53,6 +55,9 @@ class ShoppingListItemInput(BaseModel):
     name: str
     quantity: float = Field(..., gt=0)
     unit: str
+    preferred_brand: str | None = None
+    category: str | None = None
+    estimated_weight_kg: float | None = Field(default=None, ge=0)
 
 
 class StoreBasket(BaseModel):
@@ -90,6 +95,7 @@ class RouteRequest(BaseModel):
     fuel_price_eur_per_liter: float | None = Field(default=None, gt=0)
     stores: list[StoreBasket]
     distance_matrix_km: dict[str, dict[str, float]] | None = None
+    distance_weight_eur_per_km: float = Field(default=0.08, ge=0)
 
 
 class RouteStoreDecision(BaseModel):
@@ -99,8 +105,28 @@ class RouteStoreDecision(BaseModel):
     basket_total_eur: float
     mobility_cost_eur: float
     fuel_cost_eur: float
+    estimated_total_eur: float
+    weighted_score_eur: float
     net_savings_vs_baseline_eur: float
     reason: str
+
+
+class RankedRouteOption(BaseModel):
+    rank: int
+    store_id: str
+    chain: str
+    distance_km: float
+    basket_total_eur: float
+    mobility_cost_eur: float
+    estimated_total_eur: float
+    weighted_score_eur: float
+
+
+class RouteMapPoint(BaseModel):
+    store_id: str
+    chain: str
+    location: Location
+    estimated_total_eur: float
 
 
 class RouteResponse(BaseModel):
@@ -108,8 +134,55 @@ class RouteResponse(BaseModel):
     global_minimum_store_id: str
     recommended_store_id: str
     decisions: list[RouteStoreDecision]
+    ranked_options: list[RankedRouteOption]
+    map_points: list[RouteMapPoint]
     estimated_total_eur: float
     debug: dict[str, Any] = Field(default_factory=dict)
+
+
+class StoreProductOffer(BaseModel):
+    store_id: str
+    chain: str
+    product_name: str
+    brand: str
+    category: str | None = None
+    unit: str
+    price_eur: float = Field(..., ge=0)
+    is_brand_product: bool = False
+
+
+class BrandAlternativeRequest(BaseModel):
+    shopping_list: list[ShoppingListItemInput]
+    offers: list[StoreProductOffer]
+
+
+class BrandAlternativeSuggestion(BaseModel):
+    item_name: str
+    preferred_brand: str
+    preferred_store_id: str
+    preferred_chain: str
+    preferred_total_eur: float
+    alternative_brand: str
+    alternative_store_id: str
+    alternative_chain: str
+    alternative_total_eur: float
+    savings_eur: float
+
+
+class BrandAlternativeResponse(BaseModel):
+    suggestions: list[BrandAlternativeSuggestion]
+    total_potential_savings_eur: float
+
+
+class OnboardingInitializeRequest(BaseModel):
+    user: UserContext
+
+
+class OnboardingInitializeResponse(BaseModel):
+    onboarding_ready: bool
+    message: str
+    next_step: str
+    defaults: dict[str, float]
 
 
 class ParseRequest(BaseModel):

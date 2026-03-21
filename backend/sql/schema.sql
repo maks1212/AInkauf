@@ -10,6 +10,8 @@ CREATE TABLE app_user (
     vehicle_consumption_per_100km NUMERIC(5, 2) CHECK (vehicle_consumption_per_100km > 0),
     fuel_type fuel_type,
     transit_cost_per_km_eur NUMERIC(5, 2) CHECK (transit_cost_per_km_eur >= 0),
+    carrying_capacity_kg NUMERIC(6, 2) CHECK (carrying_capacity_kg > 0),
+    max_reachable_distance_km NUMERIC(6, 2) CHECK (max_reachable_distance_km >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

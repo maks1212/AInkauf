@@ -45,6 +45,8 @@ class AppUser(Base):
     vehicle_consumption_per_100km: Mapped[float | None] = mapped_column(Numeric(5, 2))
     fuel_type: Mapped[FuelType | None] = mapped_column(Enum(FuelType))
     transit_cost_per_km_eur: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    carrying_capacity_kg: Mapped[float | None] = mapped_column(Numeric(6, 2))
+    max_reachable_distance_km: Mapped[float | None] = mapped_column(Numeric(6, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     shopping_lists: Mapped[list["ShoppingList"]] = relationship(back_populates="user", cascade="all, delete-orphan")

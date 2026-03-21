@@ -1,6 +1,6 @@
 # AInkauf
 
-Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Mobilitaetskosten einrechnen und wirtschaftlich sinnvolle Einkaufsentscheidungen treffen.
+Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Mobilitaetskosten einrechnen, Marken-Alternativen vorschlagen und wirtschaftlich sinnvolle Einkaufsentscheidungen treffen.
 
 ## Tech Stack
 
@@ -82,6 +82,22 @@ Endpoint: `POST /optimization/calculate-optimal-route`
 - Findet den globalen Preis-Minimum-Store
 - Berücksichtigt Zusatzdistanz gegenüber dem nächstgelegenen vollständigen Store
 - Schließt Stores aus, falls Netto-Ersparnis negativ ist
+- Filtert bei `foot`/`bike` nach erreichbarer Distanz
+- Berücksichtigt Traglast-Limit bei `foot`/`bike`
+- Liefert `ranked_options` (gewichteter Score aus Preis + Distanz)
+- Liefert `map_points` fuer eine Kartenvisualisierung
+
+### 3) Marken-Alternativen und Ersparnis
+Endpoint: `POST /optimization/brand-alternatives`
+
+- Wenn ein Artikel `preferred_brand` hat, sucht die API guenstigere Alternativen
+- Antwort enthaelt konkrete Vorschlaege pro Artikel plus `total_potential_savings_eur`
+
+### 4) Erststart-Onboarding
+Endpoint: `POST /onboarding/initialize`
+
+- validiert Standort und Mobilitaetsvariante
+- legt sinnvolle Default-Werte fuer Fuss-/Rad-Reichweite und Traglast fest
 
 ## Backend starten
 
@@ -162,5 +178,32 @@ curl -X POST http://localhost:8000/optimization/detour-worth-it \
       "location": {"lat": 48.2082, "lng": 16.3738},
       "transport_mode": "bike"
     }
+  }'
+```
+
+### Route-Optimierung mit Fuss-/Rad-Einschraenkung
+
+```bash
+curl -X POST http://localhost:8000/optimization/calculate-optimal-route \
+  -H "Content-Type: application/json" \
+  -d '{
+    "shopping_list": [
+      {"name":"Wasser", "quantity": 4, "unit":"l", "estimated_weight_kg": 4.0}
+    ],
+    "user": {
+      "location": {"lat": 48.2082, "lng": 16.3738},
+      "transport_mode": "foot",
+      "max_reachable_distance_km": 2.0,
+      "carrying_capacity_kg": 6.0
+    },
+    "stores": [
+      {
+        "store_id":"spar-1010",
+        "chain":"Spar",
+        "location":{"lat":48.214, "lng":16.376},
+        "basket_total_eur": 9.5,
+        "missing_items": 0
+      }
+    ]
   }'
 ```
