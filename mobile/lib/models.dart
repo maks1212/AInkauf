@@ -21,6 +21,7 @@ class ParsedItem {
 class DetourDecision {
   final bool isWorthIt;
   final double grossSavingsEur;
+  final double mobilityCostEur;
   final double fuelCostEur;
   final double netSavingsEur;
   final String explanation;
@@ -28,15 +29,19 @@ class DetourDecision {
   DetourDecision({
     required this.isWorthIt,
     required this.grossSavingsEur,
+    required this.mobilityCostEur,
     required this.fuelCostEur,
     required this.netSavingsEur,
     required this.explanation,
   });
 
   factory DetourDecision.fromJson(Map<String, dynamic> json) {
+    final mobilityCost =
+        (json['mobility_cost_eur'] ?? json['fuel_cost_eur']) as num;
     return DetourDecision(
       isWorthIt: json['is_worth_it'] as bool,
       grossSavingsEur: (json['gross_savings_eur'] as num).toDouble(),
+      mobilityCostEur: mobilityCost.toDouble(),
       fuelCostEur: (json['fuel_cost_eur'] as num).toDouble(),
       netSavingsEur: (json['net_savings_eur'] as num).toDouble(),
       explanation: json['explanation'] as String,

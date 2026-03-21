@@ -22,6 +22,15 @@ from .database import Base
 class FuelType(str, enum.Enum):
     diesel = "diesel"
     benzin = "benzin"
+    autogas = "autogas"
+    strom = "strom"
+
+
+class TransportMode(str, enum.Enum):
+    car = "car"
+    foot = "foot"
+    bike = "bike"
+    transit = "transit"
 
 
 class AppUser(Base):
@@ -30,8 +39,12 @@ class AppUser(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     latitude: Mapped[float] = mapped_column(Numeric(9, 6), nullable=False)
     longitude: Mapped[float] = mapped_column(Numeric(9, 6), nullable=False)
-    vehicle_consumption_l_per_100km: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
-    fuel_type: Mapped[FuelType] = mapped_column(Enum(FuelType), nullable=False)
+    transport_mode: Mapped[TransportMode] = mapped_column(
+        Enum(TransportMode), nullable=False, default=TransportMode.car
+    )
+    vehicle_consumption_per_100km: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    fuel_type: Mapped[FuelType | None] = mapped_column(Enum(FuelType))
+    transit_cost_per_km_eur: Mapped[float | None] = mapped_column(Numeric(5, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     shopping_lists: Mapped[list["ShoppingList"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -83,7 +96,7 @@ class FuelPrice(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     fuel_type: Mapped[FuelType] = mapped_column(Enum(FuelType), nullable=False)
-    price_eur_per_liter: Mapped[float] = mapped_column(Numeric(6, 3), nullable=False)
+    price_eur_per_unit: Mapped[float] = mapped_column(Numeric(6, 3), nullable=False)
     region_code: Mapped[str | None] = mapped_column(String(40))
     source: Mapped[str] = mapped_column(String(120), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

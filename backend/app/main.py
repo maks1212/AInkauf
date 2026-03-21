@@ -37,8 +37,12 @@ def detour_worth_it(req: DetourCheckRequest) -> DetourCheckResponse:
         base_total=req.base_store_total_eur,
         candidate_total=req.candidate_store_total_eur,
         detour_distance_km=req.detour_distance_km,
-        consumption_l_per_100km=req.user.vehicle_consumption_l_per_100km,
-        fuel_price=req.fuel_price_eur_per_liter,
+        user=req.user,
+        energy_price_eur_per_unit=(
+            req.energy_price_eur_per_unit
+            if req.energy_price_eur_per_unit is not None
+            else req.fuel_price_eur_per_liter
+        ),
     )
 
 

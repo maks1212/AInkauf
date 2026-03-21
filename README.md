@@ -1,6 +1,6 @@
 # AInkauf
 
-Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Spritkosten einrechnen und wirtschaftlich sinnvolle Einkaufsentscheidungen treffen.
+Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Mobilitaetskosten einrechnen und wirtschaftlich sinnvolle Einkaufsentscheidungen treffen.
 
 ## Tech Stack
 
@@ -56,11 +56,25 @@ Endpoint: `POST /optimization/detour-worth-it`
 Formel:
 
 ```text
-K = (D / 100) * Verbrauch * Spritpreis
+Auto: K = (D / 100) * Verbrauch * Energiepreis
+Rad/Fuß: K = 0
+Öffis: K = D * Oeffi_Kosten_pro_km
 Netto = (Preis_Basisladen - Preis_Alternativladen) - K
 ```
 
 Wenn `Netto < 0`, dann ist der Umweg nicht wirtschaftlich.
+
+Unterstuetzte Antriebsarten im Auto-Modus:
+- `diesel`
+- `benzin`
+- `autogas`
+- `strom` (mit Verbrauch in kWh/100km und Preis in EUR/kWh)
+
+Unterstuetzte Transportmodi:
+- `car`
+- `foot`
+- `bike`
+- `transit`
 
 ### 2) Gesamt-Route optimieren
 Endpoint: `POST /optimization/calculate-optimal-route`
@@ -125,11 +139,28 @@ curl -X POST http://localhost:8000/optimization/detour-worth-it \
     "base_store_total_eur": 42.90,
     "candidate_store_total_eur": 41.99,
     "detour_distance_km": 5,
-    "fuel_price_eur_per_liter": 1.70,
+    "energy_price_eur_per_unit": 1.70,
     "user": {
       "location": {"lat": 48.2082, "lng": 16.3738},
-      "vehicle_consumption_l_per_100km": 6.5,
+      "transport_mode": "car",
+      "vehicle_consumption_per_100km": 6.5,
       "fuel_type": "benzin"
+    }
+  }'
+```
+
+### Detour-Check (kostenloser Modus: Rad/Fuß)
+
+```bash
+curl -X POST http://localhost:8000/optimization/detour-worth-it \
+  -H "Content-Type: application/json" \
+  -d '{
+    "base_store_total_eur": 42.90,
+    "candidate_store_total_eur": 42.40,
+    "detour_distance_km": 5,
+    "user": {
+      "location": {"lat": 48.2082, "lng": 16.3738},
+      "transport_mode": "bike"
     }
   }'
 ```

@@ -40,8 +40,13 @@ class _HomeScreenState extends State<HomeScreen> {
       TextEditingController(text: '5');
   final TextEditingController consumptionController =
       TextEditingController(text: '6.5');
-  final TextEditingController fuelPriceController =
+  final TextEditingController energyPriceController =
       TextEditingController(text: '1.70');
+  final TextEditingController transitCostController =
+      TextEditingController(text: '0.40');
+
+  String selectedTransportMode = 'car';
+  String selectedFuelType = 'benzin';
 
   ParsedItem? parsedItem;
   DetourDecision? detourDecision;
@@ -54,7 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
     candidateTotalController.dispose();
     distanceController.dispose();
     consumptionController.dispose();
-    fuelPriceController.dispose();
+    energyPriceController.dispose();
+    transitCostController.dispose();
     super.dispose();
   }
 
@@ -78,9 +84,17 @@ class _HomeScreenState extends State<HomeScreen> {
         baseStoreTotal: double.parse(baseTotalController.text),
         candidateStoreTotal: double.parse(candidateTotalController.text),
         detourDistanceKm: double.parse(distanceController.text),
-        consumptionLPer100km: double.parse(consumptionController.text),
-        fuelType: 'benzin',
-        fuelPricePerLiter: double.parse(fuelPriceController.text),
+        transportMode: selectedTransportMode,
+        consumptionPer100km: selectedTransportMode == 'car'
+            ? double.parse(consumptionController.text)
+            : null,
+        fuelType: selectedTransportMode == 'car' ? selectedFuelType : null,
+        energyPricePerUnit: selectedTransportMode == 'car'
+            ? double.parse(energyPriceController.text)
+            : null,
+        transitCostPerKmEur: selectedTransportMode == 'transit'
+            ? double.parse(transitCostController.text)
+            : null,
       );
       setState(() {
         detourDecision = result;
@@ -140,18 +154,62 @@ class _HomeScreenState extends State<HomeScreen> {
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(labelText: 'Umweg in km'),
             ),
-            TextField(
-              controller: consumptionController,
-              keyboardType: TextInputType.number,
+            DropdownButtonFormField<String>(
+              value: selectedTransportMode,
               decoration:
-                  const InputDecoration(labelText: 'Verbrauch (L/100km)'),
+                  const InputDecoration(labelText: 'Transportmodus'),
+              items: const [
+                DropdownMenuItem(value: 'car', child: Text('Auto')),
+                DropdownMenuItem(value: 'foot', child: Text('Zu Fuß')),
+                DropdownMenuItem(value: 'bike', child: Text('Rad')),
+                DropdownMenuItem(value: 'transit', child: Text('Oeffis')),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => selectedTransportMode = value);
+              },
             ),
-            TextField(
-              controller: fuelPriceController,
-              keyboardType: TextInputType.number,
-              decoration:
-                  const InputDecoration(labelText: 'Spritpreis (EUR/Liter)'),
-            ),
+            if (selectedTransportMode == 'car') ...[
+              DropdownButtonFormField<String>(
+                value: selectedFuelType,
+                decoration: const InputDecoration(labelText: 'Antriebsart'),
+                items: const [
+                  DropdownMenuItem(value: 'benzin', child: Text('Benzin')),
+                  DropdownMenuItem(value: 'diesel', child: Text('Diesel')),
+                  DropdownMenuItem(value: 'autogas', child: Text('Autogas')),
+                  DropdownMenuItem(value: 'strom', child: Text('Strom')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() => selectedFuelType = value);
+                },
+              ),
+              TextField(
+                controller: consumptionController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: selectedFuelType == 'strom'
+                      ? 'Verbrauch (kWh/100km)'
+                      : 'Verbrauch (L/100km)',
+                ),
+              ),
+              TextField(
+                controller: energyPriceController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: selectedFuelType == 'strom'
+                      ? 'Strompreis (EUR/kWh)'
+                      : 'Spritpreis (EUR/Liter)',
+                ),
+              ),
+            ],
+            if (selectedTransportMode == 'transit')
+              TextField(
+                controller: transitCostController,
+                keyboardType: TextInputType.number,
+                decoration:
+                    const InputDecoration(labelText: 'Oeffi-Kosten (EUR/km)'),
+              ),
             const SizedBox(height: 8),
             FilledButton(
               onPressed: evaluateDetour,
@@ -175,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         'Brutto-Ersparnis: ${detourDecision!.grossSavingsEur.toStringAsFixed(2)} EUR',
                       ),
                       Text(
-                        'Spritkosten: ${detourDecision!.fuelCostEur.toStringAsFixed(2)} EUR',
+                        'Mobilitaetskosten: ${detourDecision!.mobilityCostEur.toStringAsFixed(2)} EUR',
                       ),
                       Text(
                         'Netto-Ersparnis: ${detourDecision!.netSavingsEur.toStringAsFixed(2)} EUR',

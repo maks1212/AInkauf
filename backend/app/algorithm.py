@@ -8,6 +8,8 @@ from .schemas import (
     RouteRequest,
     RouteResponse,
     RouteStoreDecision,
+    TransportMode,
+    UserContext,
 )
 
 
@@ -25,32 +27,62 @@ def haversine_km(a: Location, b: Location) -> float:
     return 2 * radius * math.asin(math.sqrt(h))
 
 
-def fuel_cost_eur(distance_km: float, consumption_l_per_100km: float, fuel_price: float) -> float:
-    return (distance_km / 100.0) * consumption_l_per_100km * fuel_price
+def resolve_energy_price(energy_price_eur_per_unit: float | None, legacy_fuel_price: float | None) -> float | None:
+    return energy_price_eur_per_unit if energy_price_eur_per_unit is not None else legacy_fuel_price
+
+
+def mobility_cost_eur(
+    distance_km: float,
+    user: UserContext,
+    energy_price_eur_per_unit: float | None,
+    default_transit_cost_per_km: float = 0.40,
+) -> float:
+    if user.transport_mode in (TransportMode.foot, TransportMode.bike):
+        return 0.0
+
+    if user.transport_mode == TransportMode.transit:
+        transit_cost = (
+            user.transit_cost_per_km_eur
+            if user.transit_cost_per_km_eur is not None
+            else default_transit_cost_per_km
+        )
+        return distance_km * transit_cost
+
+    if user.vehicle_consumption_per_100km is None:
+        raise ValueError("vehicle_consumption_per_100km fehlt fuer car mode.")
+    if energy_price_eur_per_unit is None:
+        raise ValueError("energy_price_eur_per_unit (oder fuel_price_eur_per_liter) fehlt fuer car mode.")
+
+    return (distance_km / 100.0) * user.vehicle_consumption_per_100km * energy_price_eur_per_unit
 
 
 def detour_check(
     base_total: float,
     candidate_total: float,
     detour_distance_km: float,
-    consumption_l_per_100km: float,
-    fuel_price: float,
+    user: UserContext,
+    energy_price_eur_per_unit: float | None,
 ) -> DetourCheckResponse:
     gross_savings = base_total - candidate_total
-    fuel_cost = fuel_cost_eur(detour_distance_km, consumption_l_per_100km, fuel_price)
-    net = gross_savings - fuel_cost
+    transport_cost = mobility_cost_eur(
+        detour_distance_km,
+        user,
+        energy_price_eur_per_unit=energy_price_eur_per_unit,
+    )
+    net = gross_savings - transport_cost
     is_worth_it = net >= 0
 
     explanation = (
         "Umweg wirtschaftlich sinnvoll."
         if is_worth_it
-        else "Umweg nicht sinnvoll, da Spritkosten die Ersparnis aufzehren."
+        else "Umweg nicht sinnvoll, da Mobilitaetskosten die Ersparnis aufzehren."
     )
 
     return DetourCheckResponse(
         is_worth_it=is_worth_it,
         gross_savings_eur=round(gross_savings, 2),
-        fuel_cost_eur=round(fuel_cost, 2),
+        mobility_cost_eur=round(transport_cost, 2),
+        fuel_cost_eur=round(transport_cost, 2),
         net_savings_eur=round(net, 2),
         explanation=explanation,
     )
@@ -63,6 +95,10 @@ def _distance_from_user(req: RouteRequest, store_id: str, store_location: Locati
 
 
 def calculate_optimal_route(req: RouteRequest) -> RouteResponse:
+    energy_price = resolve_energy_price(
+        req.energy_price_eur_per_unit,
+        req.fuel_price_eur_per_liter,
+    )
     valid_stores = [store for store in req.stores if store.missing_items == 0]
     if not valid_stores:
         raise ValueError("Kein Laden kann alle Produkte liefern.")
@@ -84,18 +120,18 @@ def calculate_optimal_route(req: RouteRequest) -> RouteResponse:
 
     for store, distance_km in stores_with_distance:
         extra_distance_km = max(0.0, distance_km - baseline_distance)
-        fuel = fuel_cost_eur(
+        transport_cost = mobility_cost_eur(
             extra_distance_km,
-            req.user.vehicle_consumption_l_per_100km,
-            req.fuel_price_eur_per_liter,
+            req.user,
+            energy_price_eur_per_unit=energy_price,
         )
-        net = (baseline_total - store.basket_total_eur) - fuel
+        net = (baseline_total - store.basket_total_eur) - transport_cost
         include = net >= 0 or store.store_id == baseline_store.store_id
 
         if include and net > best_net:
             best_store_id = store.store_id
             best_net = net
-            best_total = store.basket_total_eur + fuel
+            best_total = store.basket_total_eur + transport_cost
 
         reason = "Basisladen (naechster vollstaendiger Warenkorb)"
         if store.store_id != baseline_store.store_id:
@@ -111,7 +147,8 @@ def calculate_optimal_route(req: RouteRequest) -> RouteResponse:
                 included=include,
                 distance_km=round(distance_km, 2),
                 basket_total_eur=round(store.basket_total_eur, 2),
-                fuel_cost_eur=round(fuel, 2),
+                mobility_cost_eur=round(transport_cost, 2),
+                fuel_cost_eur=round(transport_cost, 2),
                 net_savings_vs_baseline_eur=round(net, 2),
                 reason=reason,
             )

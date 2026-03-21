@@ -1,12 +1,15 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
-CREATE TYPE fuel_type AS ENUM ('diesel', 'benzin');
+CREATE TYPE fuel_type AS ENUM ('diesel', 'benzin', 'autogas', 'strom');
+CREATE TYPE transport_mode AS ENUM ('car', 'foot', 'bike', 'transit');
 
 CREATE TABLE app_user (
     id UUID PRIMARY KEY,
     home_location GEOGRAPHY(POINT, 4326) NOT NULL,
-    vehicle_consumption_l_per_100km NUMERIC(5, 2) NOT NULL CHECK (vehicle_consumption_l_per_100km > 0),
-    fuel_type fuel_type NOT NULL,
+    transport_mode transport_mode NOT NULL DEFAULT 'car',
+    vehicle_consumption_per_100km NUMERIC(5, 2) CHECK (vehicle_consumption_per_100km > 0),
+    fuel_type fuel_type,
+    transit_cost_per_km_eur NUMERIC(5, 2) CHECK (transit_cost_per_km_eur >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -52,7 +55,7 @@ CREATE INDEX idx_price_store_product ON store_product_price(store_id, product_id
 CREATE TABLE fuel_price (
     id UUID PRIMARY KEY,
     fuel_type fuel_type NOT NULL,
-    price_eur_per_liter NUMERIC(6, 3) NOT NULL CHECK (price_eur_per_liter > 0),
+    price_eur_per_unit NUMERIC(6, 3) NOT NULL CHECK (price_eur_per_unit > 0),
     region_code TEXT,
     source TEXT NOT NULL,
     observed_at TIMESTAMPTZ NOT NULL

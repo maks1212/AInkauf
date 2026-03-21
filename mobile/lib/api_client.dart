@@ -27,19 +27,26 @@ class ApiClient {
     required double baseStoreTotal,
     required double candidateStoreTotal,
     required double detourDistanceKm,
-    required double consumptionLPer100km,
-    required String fuelType,
-    required double fuelPricePerLiter,
+    required String transportMode,
+    double? consumptionPer100km,
+    String? fuelType,
+    double? energyPricePerUnit,
+    double? transitCostPerKmEur,
   }) async {
     final payload = {
       'base_store_total_eur': baseStoreTotal,
       'candidate_store_total_eur': candidateStoreTotal,
       'detour_distance_km': detourDistanceKm,
-      'fuel_price_eur_per_liter': fuelPricePerLiter,
+      if (energyPricePerUnit != null)
+        'energy_price_eur_per_unit': energyPricePerUnit,
       'user': {
         'location': {'lat': 48.2082, 'lng': 16.3738},
-        'vehicle_consumption_l_per_100km': consumptionLPer100km,
-        'fuel_type': fuelType,
+        'transport_mode': transportMode,
+        if (consumptionPer100km != null)
+          'vehicle_consumption_per_100km': consumptionPer100km,
+        if (fuelType != null) 'fuel_type': fuelType,
+        if (transitCostPerKmEur != null)
+          'transit_cost_per_km_eur': transitCostPerKmEur,
       },
     };
 

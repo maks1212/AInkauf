@@ -13,11 +13,32 @@ def test_detour_check_for_5km_not_worth_it():
         base_total=20.0,
         candidate_total=19.6,
         detour_distance_km=5.0,
-        consumption_l_per_100km=7.0,
-        fuel_price=1.7,
+        user=UserContext(
+            location=Location(lat=48.2082, lng=16.3738),
+            transport_mode="car",
+            vehicle_consumption_per_100km=7.0,
+            fuel_type="benzin",
+        ),
+        energy_price_eur_per_unit=1.7,
     )
     assert result.is_worth_it is False
     assert result.net_savings_eur < 0
+
+
+def test_detour_check_for_bike_has_no_mobility_cost():
+    result = detour_check(
+        base_total=20.0,
+        candidate_total=19.6,
+        detour_distance_km=5.0,
+        user=UserContext(
+            location=Location(lat=48.2082, lng=16.3738),
+            transport_mode="bike",
+        ),
+        energy_price_eur_per_unit=None,
+    )
+    assert result.is_worth_it is True
+    assert result.mobility_cost_eur == 0
+    assert result.net_savings_eur > 0
 
 
 def test_route_prefers_nearby_store_if_far_discount_too_small():
@@ -25,10 +46,11 @@ def test_route_prefers_nearby_store_if_far_discount_too_small():
         shopping_list=[ShoppingListItemInput(name="Aepfel", quantity=2, unit="kg")],
         user=UserContext(
             location=Location(lat=48.2082, lng=16.3738),
-            vehicle_consumption_l_per_100km=7.0,
+            transport_mode="car",
+            vehicle_consumption_per_100km=7.0,
             fuel_type="benzin",
         ),
-        fuel_price_eur_per_liter=1.8,
+        energy_price_eur_per_unit=1.8,
         stores=[
             StoreBasket(
                 store_id="near",
@@ -49,3 +71,31 @@ def test_route_prefers_nearby_store_if_far_discount_too_small():
     result = calculate_optimal_route(req)
     assert result.baseline_store_id == "near"
     assert result.recommended_store_id == "near"
+
+
+def test_route_with_foot_mode_prefers_global_price_minimum():
+    req = RouteRequest(
+        shopping_list=[ShoppingListItemInput(name="Milch", quantity=1, unit="l")],
+        user=UserContext(
+            location=Location(lat=48.2082, lng=16.3738),
+            transport_mode="foot",
+        ),
+        stores=[
+            StoreBasket(
+                store_id="near-expensive",
+                chain="Spar",
+                location=Location(lat=48.2090, lng=16.3740),
+                basket_total_eur=10.0,
+                missing_items=0,
+            ),
+            StoreBasket(
+                store_id="far-cheap",
+                chain="Hofer",
+                location=Location(lat=48.2800, lng=16.5000),
+                basket_total_eur=8.5,
+                missing_items=0,
+            ),
+        ],
+    )
+    result = calculate_optimal_route(req)
+    assert result.recommended_store_id == "far-cheap"
