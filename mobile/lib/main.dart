@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -360,6 +361,22 @@ class PlannerScreen extends StatefulWidget {
 }
 
 class _PlannerScreenState extends State<PlannerScreen> {
+  static const List<String> _brandFallbackSuggestions = [
+    'Clever',
+    'S-Budget',
+    'Milfina',
+    'Milsani',
+    'Milbona',
+    'Combino',
+    'Cien',
+    'W5',
+    'Ja! Natürlich',
+    'Rama',
+    'Barilla',
+    'Nöm',
+    'Schärdinger',
+  ];
+
   final quickInputController = TextEditingController(text: '3kg Aepfel');
   final itemNameController = TextEditingController();
   final itemQuantityController = TextEditingController(text: '1');
@@ -375,8 +392,11 @@ class _PlannerScreenState extends State<PlannerScreen> {
   bool loading = false;
   bool quickAdding = false;
   bool updatingLocation = false;
+  bool loadingBrandTypeahead = false;
   String? error;
   SortMode sortMode = SortMode.weighted;
+  List<String> dynamicBrandSuggestions = [];
+  Timer? brandLookupDebounce;
 
   @override
   void initState() {
@@ -386,6 +406,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
 
   @override
   void dispose() {
+    brandLookupDebounce?.cancel();
     quickInputController.dispose();
     itemNameController.dispose();
     itemQuantityController.dispose();
@@ -464,6 +485,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
       itemBrandController.clear();
       itemCategoryController.clear();
       itemWeightController.clear();
+      dynamicBrandSuggestions = [];
     });
   }
 
@@ -505,6 +527,15 @@ class _PlannerScreenState extends State<PlannerScreen> {
       });
       return;
     }
+
+    final locationUpdated = await _updateLocationFromDevice(
+      userMessagePrefix:
+          'Standortabfrage vor Optimierung fehlgeschlagen',
+    );
+    if (!locationUpdated) {
+      return;
+    }
+
     setState(() {
       loading = true;
       error = null;
@@ -534,7 +565,9 @@ class _PlannerScreenState extends State<PlannerScreen> {
     }
   }
 
-  Future<void> _updateLocationFromDevice() async {
+  Future<bool> _updateLocationFromDevice({
+    String userMessagePrefix = 'Standort konnte nicht aktualisiert werden',
+  }) async {
     setState(() {
       updatingLocation = true;
       error = null;
@@ -574,10 +607,12 @@ class _PlannerScreenState extends State<PlannerScreen> {
         profile = updatedProfile;
       });
       await widget.onProfileChanged(updatedProfile);
+      return true;
     } catch (e) {
       setState(() {
-        error = 'Standort konnte nicht aktualisiert werden: $e';
+        error = '$userMessagePrefix: $e';
       });
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -585,6 +620,55 @@ class _PlannerScreenState extends State<PlannerScreen> {
         });
       }
     }
+  }
+
+  void _scheduleBrandTypeaheadRefresh() {
+    brandLookupDebounce?.cancel();
+    final query = itemNameController.text.trim();
+    if (query.length < 2) {
+      setState(() {
+        dynamicBrandSuggestions = [];
+        loadingBrandTypeahead = false;
+      });
+      return;
+    }
+
+    setState(() {
+      loadingBrandTypeahead = true;
+    });
+    brandLookupDebounce = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final fetched = await widget.api.fetchBrandSuggestions(query);
+        if (!mounted) return;
+        setState(() {
+          dynamicBrandSuggestions = fetched;
+          loadingBrandTypeahead = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          dynamicBrandSuggestions = [];
+          loadingBrandTypeahead = false;
+        });
+      }
+    });
+  }
+
+  List<String> _combinedBrandSuggestions(String input) {
+    final merged = <String>{
+      ...dynamicBrandSuggestions,
+      ..._brandFallbackSuggestions,
+    }.toList();
+    final query = input.trim().toLowerCase();
+    if (query.isEmpty) {
+      merged.sort();
+      return merged.take(10).toList();
+    }
+    final filtered = merged
+        .where((brand) => brand.toLowerCase().contains(query))
+        .toList()
+      ..sort();
+    return filtered.take(12).toList();
   }
 
   List<RouteOption> _sortedOptions() {
@@ -815,7 +899,11 @@ class _PlannerScreenState extends State<PlannerScreen> {
                   ),
                   const SizedBox(height: 6),
                   OutlinedButton.icon(
-                    onPressed: updatingLocation ? null : _updateLocationFromDevice,
+                    onPressed: updatingLocation
+                        ? null
+                        : () {
+                            _updateLocationFromDevice();
+                          },
                     icon: const Icon(Icons.gps_fixed),
                     label: Text(
                       updatingLocation
@@ -877,7 +965,12 @@ class _PlannerScreenState extends State<PlannerScreen> {
                   const Divider(height: 18),
                   TextField(
                     controller: itemNameController,
-                    decoration: const InputDecoration(labelText: 'Artikel'),
+                    onChanged: (_) => _scheduleBrandTypeaheadRefresh(),
+                    decoration: const InputDecoration(
+                      labelText: 'Artikel',
+                      helperText:
+                          'Name eingeben, dann Marken-Vorschlaege erscheinen.',
+                    ),
                   ),
                   Row(
                     children: [
@@ -898,11 +991,50 @@ class _PlannerScreenState extends State<PlannerScreen> {
                       ),
                     ],
                   ),
-                  TextField(
-                    controller: itemBrandController,
-                    decoration: const InputDecoration(
-                      labelText: 'Bevorzugte Marke (optional)',
-                    ),
+                  Autocomplete<String>(
+                    optionsBuilder: (textEditingValue) {
+                      return _combinedBrandSuggestions(textEditingValue.text);
+                    },
+                    onSelected: (selection) {
+                      itemBrandController.text = selection;
+                    },
+                    fieldViewBuilder: (
+                      context,
+                      textEditingController,
+                      focusNode,
+                      onFieldSubmitted,
+                    ) {
+                      if (textEditingController.text !=
+                          itemBrandController.text) {
+                        textEditingController.text = itemBrandController.text;
+                        textEditingController.selection =
+                            TextSelection.collapsed(
+                          offset: textEditingController.text.length,
+                        );
+                      }
+                      return TextField(
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        onChanged: (value) {
+                          itemBrandController.text = value;
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Bevorzugte Marke (optional)',
+                          suffixIcon: loadingBrandTypeahead
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    height: 16,
+                                    width: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_drop_down),
+                        ),
+                      );
+                    },
                   ),
                   TextField(
                     controller: itemCategoryController,
@@ -950,6 +1082,11 @@ class _PlannerScreenState extends State<PlannerScreen> {
             label: Text(
               loading ? 'Optimiere...' : 'Optimierung starten',
             ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Hinweis: Vor jeder Optimierung wird dein Browser-Standort neu abgefragt.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
           if (error != null)
             Padding(

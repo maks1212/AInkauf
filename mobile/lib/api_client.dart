@@ -10,6 +10,18 @@ class ApiClient {
 
   final String baseUrl;
 
+  static const Set<String> _brandTokenIgnore = {
+    'billa',
+    'spar',
+    'lidl',
+    'hofer',
+    'bio',
+    'und',
+    'der',
+    'die',
+    'das',
+  };
+
   static const Map<String, List<String>> _storeSearchKeys = {
     'billa': ['billa'],
     'spar': ['spar'],
@@ -119,6 +131,60 @@ class ApiClient {
     return (payload['items'] as List<dynamic>)
         .map((entry) => entry as Map<String, dynamic>)
         .toList();
+  }
+
+  String? _extractBrandCandidateFromProductKey(String productKey) {
+    final normalized = _normalizeText(productKey)
+        .replaceAll('ä', 'ae')
+        .replaceAll('ö', 'oe')
+        .replaceAll('ü', 'ue')
+        .replaceAll('ß', 'ss');
+    final tokens =
+        normalized.split(' ').where((token) => token.trim().isNotEmpty).toList();
+    for (final token in tokens) {
+      if (token.length < 3) continue;
+      if (RegExp(r'^\d+$').hasMatch(token)) continue;
+      if (_brandTokenIgnore.contains(token)) continue;
+      return token[0].toUpperCase() + token.substring(1);
+    }
+    return null;
+  }
+
+  Future<List<String>> fetchBrandSuggestions(String productQuery) async {
+    final query = productQuery.trim();
+    if (query.length < 2) return const [];
+
+    final uri = Uri.parse('$baseUrl/providers/austria-prices').replace(
+      queryParameters: {
+        'stores': 'billa,spar,lidl',
+        'search': query,
+        'limit': '600',
+      },
+    );
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode >= 400) {
+        return const [];
+      }
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final items = (payload['items'] as List<dynamic>)
+          .map((entry) => entry as Map<String, dynamic>)
+          .toList();
+
+      final suggestions = <String>{};
+      for (final item in items) {
+        final candidate = _extractBrandCandidateFromProductKey(
+          item['product_key'] as String? ?? '',
+        );
+        if (candidate != null) {
+          suggestions.add(candidate);
+        }
+      }
+      return suggestions.take(30).toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<ParsedItem> parseItem(String text) async {
