@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .algorithm import calculate_optimal_route, detour_check
 from .nlp import parse_free_text_item
@@ -15,6 +16,16 @@ from .schemas import (
 )
 
 app = FastAPI(title="AInkauf API", version="0.1.0")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:4200"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 provider = MockHeisspreiseProvider()
 
 
