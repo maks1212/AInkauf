@@ -308,7 +308,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             TextField(
               controller: transitCostController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Oeffi-Kosten EUR/km'),
+              decoration:
+                  const InputDecoration(labelText: 'Oeffi-Kosten EUR/km'),
             ),
           if (mode == 'foot' || mode == 'bike') ...[
             TextField(
@@ -319,8 +320,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             TextField(
               controller: maxReachController,
               keyboardType: TextInputType.number,
-              decoration:
-                  const InputDecoration(labelText: 'Max. erreichbare Distanz (km)'),
+              decoration: const InputDecoration(
+                  labelText: 'Max. erreichbare Distanz (km)'),
             ),
           ],
           const SizedBox(height: 18),
@@ -361,6 +362,22 @@ class PlannerScreen extends StatefulWidget {
 }
 
 class _PlannerScreenState extends State<PlannerScreen> {
+  static const List<String> _itemFallbackSuggestions = [
+    'Gouda',
+    'Schinken',
+    'Milch',
+    'Butter',
+    'Joghurt',
+    'Pasta',
+    'Pizza',
+    'Aepfel',
+    'Bananen',
+    'Tomaten',
+    'Brot',
+    'Eier',
+    'Kaffee',
+    'Mineralwasser',
+  ];
   static const List<String> _brandFallbackSuggestions = [
     'Clever',
     'S-Budget',
@@ -380,7 +397,6 @@ class _PlannerScreenState extends State<PlannerScreen> {
   final quickInputController = TextEditingController(text: '3kg Aepfel');
   final itemNameController = TextEditingController();
   final itemQuantityController = TextEditingController(text: '1');
-  final itemUnitController = TextEditingController(text: 'stk');
   final itemBrandController = TextEditingController();
   final itemCategoryController = TextEditingController();
   final itemWeightController = TextEditingController();
@@ -394,11 +410,16 @@ class _PlannerScreenState extends State<PlannerScreen> {
   bool loading = false;
   bool quickAdding = false;
   bool updatingLocation = false;
+  bool loadingItemTypeahead = false;
   bool loadingBrandTypeahead = false;
   String? error;
   SortMode sortMode = SortMode.weighted;
+  String selectedItemUnit = 'stk';
+  List<String> suggestedUnits = ['stk'];
+  List<ProductInputSuggestion> dynamicItemSuggestions = [];
   List<String> dynamicBrandSuggestions = [];
   Timer? brandLookupDebounce;
+  Timer? itemLookupDebounce;
 
   @override
   void initState() {
@@ -409,10 +430,10 @@ class _PlannerScreenState extends State<PlannerScreen> {
   @override
   void dispose() {
     brandLookupDebounce?.cancel();
+    itemLookupDebounce?.cancel();
     quickInputController.dispose();
     itemNameController.dispose();
     itemQuantityController.dispose();
-    itemUnitController.dispose();
     itemBrandController.dispose();
     itemCategoryController.dispose();
     itemWeightController.dispose();
@@ -462,17 +483,28 @@ class _PlannerScreenState extends State<PlannerScreen> {
 
   void _addItem() {
     if (itemNameController.text.trim().isEmpty) return;
+    final quantity = double.tryParse(itemQuantityController.text);
+    if (quantity == null || quantity <= 0) {
+      setState(() {
+        error = 'Bitte eine sinnvolle Menge > 0 eingeben.';
+      });
+      return;
+    }
+    final brandInput = itemBrandController.text.trim();
+    if (brandInput.isNotEmpty && !_isBrandAllowed(brandInput)) {
+      setState(() {
+        error = 'Bitte eine Marke aus den Vorschlaegen waehlen.';
+      });
+      return;
+    }
+
     setState(() {
       items.add(
         ShoppingItem(
           name: itemNameController.text.trim(),
-          quantity: double.tryParse(itemQuantityController.text) ?? 1,
-          unit: itemUnitController.text.trim().isEmpty
-              ? 'stk'
-              : itemUnitController.text.trim(),
-          preferredBrand: itemBrandController.text.trim().isEmpty
-              ? null
-              : itemBrandController.text.trim(),
+          quantity: quantity,
+          unit: selectedItemUnit,
+          preferredBrand: brandInput.isEmpty ? null : brandInput,
           category: itemCategoryController.text.trim().isEmpty
               ? null
               : itemCategoryController.text.trim(),
@@ -483,11 +515,14 @@ class _PlannerScreenState extends State<PlannerScreen> {
       );
       itemNameController.clear();
       itemQuantityController.text = '1';
-      itemUnitController.text = 'stk';
       itemBrandController.clear();
       itemCategoryController.clear();
       itemWeightController.clear();
+      selectedItemUnit = 'stk';
+      suggestedUnits = ['stk'];
+      dynamicItemSuggestions = [];
       dynamicBrandSuggestions = [];
+      error = null;
     });
   }
 
@@ -498,7 +533,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
       error = null;
     });
     try {
-      final parsed = await widget.api.parseItem(quickInputController.text.trim());
+      final parsed =
+          await widget.api.parseItem(quickInputController.text.trim());
       setState(() {
         items.add(
           ShoppingItem(
@@ -531,8 +567,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
     }
 
     final locationUpdated = await _updateLocationFromDevice(
-      userMessagePrefix:
-          'Standortabfrage vor Optimierung fehlgeschlagen',
+      userMessagePrefix: 'Standortabfrage vor Optimierung fehlgeschlagen',
     );
     if (!locationUpdated) {
       return;
@@ -632,6 +667,102 @@ class _PlannerScreenState extends State<PlannerScreen> {
     }
   }
 
+  List<String> _unitHintsForName(String itemName) {
+    final name = itemName.toLowerCase();
+    if (name.contains('pizza') ||
+        name.contains('ei') ||
+        name.contains('banane') ||
+        name.contains('apfel') ||
+        name.contains('broetchen') ||
+        name.contains('stueck')) {
+      return ['stk', 'pack'];
+    }
+    if (name.contains('kaese') ||
+        name.contains('kase') ||
+        name.contains('gouda') ||
+        name.contains('schinken') ||
+        name.contains('wurst') ||
+        name.contains('fleisch') ||
+        name.contains('butter')) {
+      return ['g', 'kg'];
+    }
+    if (name.contains('milch') ||
+        name.contains('saft') ||
+        name.contains('wasser') ||
+        name.contains('cola') ||
+        name.contains('drink')) {
+      return ['l', 'ml'];
+    }
+    return ['stk', 'pack', 'g', 'kg', 'ml', 'l'];
+  }
+
+  void _refreshUnitSuggestions(String itemName) {
+    final query = itemName.trim().toLowerCase();
+    final liveUnits = <String>{};
+    for (final suggestion in dynamicItemSuggestions) {
+      final name = suggestion.name.toLowerCase();
+      if (query.isNotEmpty &&
+          (name.contains(query) || query.contains(name.split(' ').first))) {
+        liveUnits.addAll(suggestion.unitOptions);
+      }
+    }
+    final merged = <String>{
+      ..._unitHintsForName(itemName),
+      ...liveUnits,
+    }.toList();
+    if (merged.isEmpty) {
+      merged.add('stk');
+    }
+    setState(() {
+      suggestedUnits = merged;
+      if (!suggestedUnits.contains(selectedItemUnit)) {
+        selectedItemUnit = suggestedUnits.first;
+      }
+    });
+  }
+
+  void _scheduleItemTypeaheadRefresh() {
+    itemLookupDebounce?.cancel();
+    final query = itemNameController.text.trim();
+    if (query.length < 2) {
+      setState(() {
+        dynamicItemSuggestions = [];
+        loadingItemTypeahead = false;
+      });
+      _refreshUnitSuggestions(query);
+      return;
+    }
+
+    setState(() {
+      loadingItemTypeahead = true;
+    });
+    itemLookupDebounce = Timer(const Duration(milliseconds: 320), () async {
+      try {
+        final suggestions =
+            await widget.api.fetchProductInputSuggestions(query);
+        if (!mounted) return;
+        final mergedBrands = <String>{
+          ...dynamicBrandSuggestions,
+          ...suggestions.expand((entry) => entry.brandOptions),
+        }.toList()
+          ..sort();
+        setState(() {
+          dynamicItemSuggestions = suggestions;
+          dynamicBrandSuggestions = mergedBrands;
+          loadingItemTypeahead = false;
+        });
+        _refreshUnitSuggestions(query);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          dynamicItemSuggestions = [];
+          loadingItemTypeahead = false;
+        });
+        _refreshUnitSuggestions(query);
+      }
+    });
+  }
+
   void _scheduleBrandTypeaheadRefresh() {
     brandLookupDebounce?.cancel();
     final query = itemNameController.text.trim();
@@ -664,6 +795,22 @@ class _PlannerScreenState extends State<PlannerScreen> {
     });
   }
 
+  List<String> _combinedItemSuggestions(String input) {
+    final merged = <String>{
+      ...dynamicItemSuggestions.map((entry) => entry.name),
+      ..._itemFallbackSuggestions,
+    }.toList()
+      ..sort();
+    final query = input.trim().toLowerCase();
+    if (query.isEmpty) {
+      return merged.take(14).toList();
+    }
+    return merged
+        .where((item) => item.toLowerCase().contains(query))
+        .take(16)
+        .toList();
+  }
+
   List<String> _combinedBrandSuggestions(String input) {
     final merged = <String>{
       ...dynamicBrandSuggestions,
@@ -681,6 +828,13 @@ class _PlannerScreenState extends State<PlannerScreen> {
     return filtered.take(12).toList();
   }
 
+  bool _isBrandAllowed(String brandInput) {
+    final allowed = _combinedBrandSuggestions(itemNameController.text)
+        .map((entry) => entry.toLowerCase())
+        .toSet();
+    return allowed.contains(brandInput.toLowerCase());
+  }
+
   void _markChecklistItemPurchased(ShoppingChecklistEntry entry) {
     setState(() {
       checklistOpen.removeWhere((item) => item.id == entry.id);
@@ -689,7 +843,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
   }
 
   Widget _buildChecklistSection() {
-    if (routeResult == null || (checklistOpen.isEmpty && checklistHistory.isEmpty)) {
+    if (routeResult == null ||
+        (checklistOpen.isEmpty && checklistHistory.isEmpty)) {
       return const SizedBox.shrink();
     }
 
@@ -699,8 +854,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
     }
     final groupedEntries = grouped.entries.toList()
       ..sort((a, b) {
-        final distanceCompare =
-            a.value.first.storeDistanceKm.compareTo(b.value.first.storeDistanceKm);
+        final distanceCompare = a.value.first.storeDistanceKm
+            .compareTo(b.value.first.storeDistanceKm);
         if (distanceCompare != 0) {
           return distanceCompare;
         }
@@ -760,28 +915,26 @@ class _PlannerScreenState extends State<PlannerScreen> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          ...checklistHistory
-              .reversed
-              .map(
-                (entry) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.check_box,
-                    color: Colors.green,
-                  ),
-                  title: Text(
-                    '${entry.quantityLabel} ${entry.itemName}',
-                    style: const TextStyle(
-                      decoration: TextDecoration.lineThrough,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${entry.storeChain} • '
-                    '${entry.purchasedAt?.toLocal().toIso8601String().substring(11, 16) ?? ''}',
-                  ),
+          ...checklistHistory.reversed.map(
+            (entry) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(
+                Icons.check_box,
+                color: Colors.green,
+              ),
+              title: Text(
+                '${entry.quantityLabel} ${entry.itemName}',
+                style: const TextStyle(
+                  decoration: TextDecoration.lineThrough,
                 ),
               ),
+              subtitle: Text(
+                '${entry.storeChain} • '
+                '${entry.purchasedAt?.toLocal().toIso8601String().substring(11, 16) ?? ''}',
+              ),
+            ),
+          ),
         ],
       ],
     );
@@ -790,9 +943,11 @@ class _PlannerScreenState extends State<PlannerScreen> {
   List<RouteOption> _sortedOptions() {
     final options = [...?routeResult?.rankedOptions];
     if (sortMode == SortMode.cheap) {
-      options.sort((a, b) => a.estimatedTotalEur.compareTo(b.estimatedTotalEur));
+      options
+          .sort((a, b) => a.estimatedTotalEur.compareTo(b.estimatedTotalEur));
     } else if (sortMode == SortMode.expensive) {
-      options.sort((a, b) => b.estimatedTotalEur.compareTo(a.estimatedTotalEur));
+      options
+          .sort((a, b) => b.estimatedTotalEur.compareTo(a.estimatedTotalEur));
     } else {
       options.sort((a, b) => a.weightedScoreEur.compareTo(b.weightedScoreEur));
     }
@@ -1079,14 +1234,58 @@ class _PlannerScreenState extends State<PlannerScreen> {
                     ),
                   ),
                   const Divider(height: 18),
-                  TextField(
-                    controller: itemNameController,
-                    onChanged: (_) => _scheduleBrandTypeaheadRefresh(),
-                    decoration: const InputDecoration(
-                      labelText: 'Artikel',
-                      helperText:
-                          'Name eingeben, dann Marken-Vorschlaege erscheinen.',
-                    ),
+                  Autocomplete<String>(
+                    optionsBuilder: (textEditingValue) {
+                      return _combinedItemSuggestions(textEditingValue.text);
+                    },
+                    onSelected: (selection) {
+                      itemNameController.text = selection;
+                      _scheduleItemTypeaheadRefresh();
+                      _scheduleBrandTypeaheadRefresh();
+                      _refreshUnitSuggestions(selection);
+                    },
+                    fieldViewBuilder: (
+                      context,
+                      textEditingController,
+                      focusNode,
+                      onFieldSubmitted,
+                    ) {
+                      if (textEditingController.text !=
+                          itemNameController.text) {
+                        textEditingController.text = itemNameController.text;
+                        textEditingController.selection =
+                            TextSelection.collapsed(
+                          offset: textEditingController.text.length,
+                        );
+                      }
+                      return TextField(
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        onChanged: (value) {
+                          itemNameController.text = value;
+                          _scheduleItemTypeaheadRefresh();
+                          _scheduleBrandTypeaheadRefresh();
+                          _refreshUnitSuggestions(value);
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Artikel',
+                          helperText:
+                              'Tippen fuer Vorschlaege. Name waehlen, dann Marke/Einheit folgen logisch.',
+                          suffixIcon: loadingItemTypeahead
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    height: 16,
+                                    width: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(Icons.search),
+                        ),
+                      );
+                    },
                   ),
                   Row(
                     children: [
@@ -1094,18 +1293,33 @@ class _PlannerScreenState extends State<PlannerScreen> {
                         child: TextField(
                           controller: itemQuantityController,
                           keyboardType: TextInputType.number,
-                          decoration:
-                              const InputDecoration(labelText: 'Menge'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: itemUnitController,
-                          decoration: const InputDecoration(labelText: 'Einheit'),
+                          decoration: const InputDecoration(labelText: 'Menge'),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Einheit (vorgeschlagen)',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: suggestedUnits
+                        .map(
+                          (unit) => ChoiceChip(
+                            label: Text(unit),
+                            selected: selectedItemUnit == unit,
+                            onSelected: (_) {
+                              setState(() {
+                                selectedItemUnit = unit;
+                              });
+                            },
+                          ),
+                        )
+                        .toList(),
                   ),
                   Autocomplete<String>(
                     optionsBuilder: (textEditingValue) {
@@ -1135,7 +1349,9 @@ class _PlannerScreenState extends State<PlannerScreen> {
                           itemBrandController.text = value;
                         },
                         decoration: InputDecoration(
-                          labelText: 'Bevorzugte Marke (optional)',
+                          labelText: 'Bevorzugte Marke',
+                          helperText:
+                              'Nur Marken aus Vorschlaegen sind zulaessig.',
                           suffixIcon: loadingBrandTypeahead
                               ? const Padding(
                                   padding: EdgeInsets.all(12),
@@ -1154,8 +1370,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
                   ),
                   TextField(
                     controller: itemCategoryController,
-                    decoration:
-                        const InputDecoration(labelText: 'Kategorie (optional)'),
+                    decoration: const InputDecoration(
+                        labelText: 'Kategorie (optional)'),
                   ),
                   TextField(
                     controller: itemWeightController,
@@ -1177,7 +1393,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
                     children: items
                         .map(
                           (item) => InputChip(
-                            label: Text('${item.quantity} ${item.unit} ${item.name}'),
+                            label: Text(
+                                '${item.quantity} ${item.unit} ${item.name}'),
                             onDeleted: () {
                               setState(() {
                                 items.remove(item);

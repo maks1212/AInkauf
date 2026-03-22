@@ -22,6 +22,15 @@ class ApiClient {
     'die',
     'das',
   };
+  static const Set<String> _knownUnits = {
+    'g',
+    'kg',
+    'ml',
+    'l',
+    'stk',
+    'pack',
+    'paket',
+  };
 
   static const Map<String, List<String>> _storeSearchKeys = {
     'billa': ['billa'],
@@ -41,6 +50,18 @@ class ApiClient {
     return value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
   }
 
+  String _titleCaseWords(String text) {
+    return text
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map(
+          (word) => word.length == 1
+              ? word.toUpperCase()
+              : '${word[0].toUpperCase()}${word.substring(1)}',
+        )
+        .join(' ');
+  }
+
   List<String> _searchTermsFromItems(List<ShoppingItem> items) {
     final terms = <String>{};
     for (final item in items) {
@@ -54,7 +75,8 @@ class ApiClient {
     return terms.toList();
   }
 
-  ({String unitFamily, double quantity}) _toBaseQuantity(double value, String unit) {
+  ({String unitFamily, double quantity}) _toBaseQuantity(
+      double value, String unit) {
     final normalizedUnit = unit.trim().toLowerCase();
     if (normalizedUnit == 'g') {
       return (unitFamily: 'mass', quantity: value / 1000.0);
@@ -70,7 +92,6 @@ class ApiClient {
     }
     if (normalizedUnit == 'stk' ||
         normalizedUnit == 'stueck' ||
-        normalizedUnit == 'stück' ||
         normalizedUnit == 'pack' ||
         normalizedUnit == 'paket') {
       return (unitFamily: 'count', quantity: value);
@@ -94,9 +115,10 @@ class ApiClient {
     final price = (record['price_eur'] as num).toDouble();
     final packageUnit =
         (record['package_unit'] as String?)?.trim().toLowerCase() ?? item.unit;
-    final packageQuantity = ((record['package_quantity'] as num?)?.toDouble() ?? 1.0)
-        .clamp(0.0001, 1000000)
-        .toDouble();
+    final packageQuantity =
+        ((record['package_quantity'] as num?)?.toDouble() ?? 1.0)
+            .clamp(0.0001, 1000000)
+            .toDouble();
 
     final requested = _toBaseQuantity(item.quantity, item.unit);
     final package = _toBaseQuantity(packageQuantity, packageUnit);
@@ -138,12 +160,14 @@ class ApiClient {
 
   String? _extractBrandCandidateFromProductKey(String productKey) {
     final normalized = _normalizeText(productKey)
-        .replaceAll('ä', 'ae')
-        .replaceAll('ö', 'oe')
-        .replaceAll('ü', 'ue')
-        .replaceAll('ß', 'ss');
-    final tokens =
-        normalized.split(' ').where((token) => token.trim().isNotEmpty).toList();
+        .replaceAll('\u00e4', 'ae')
+        .replaceAll('\u00f6', 'oe')
+        .replaceAll('\u00fc', 'ue')
+        .replaceAll('\u00df', 'ss');
+    final tokens = normalized
+        .split(' ')
+        .where((token) => token.trim().isNotEmpty)
+        .toList();
     for (final token in tokens) {
       if (token.length < 3) continue;
       if (RegExp(r'^\d+$').hasMatch(token)) continue;
@@ -151,6 +175,105 @@ class ApiClient {
       return token[0].toUpperCase() + token.substring(1);
     }
     return null;
+  }
+
+  String _extractDisplayNameFromProductKey(String productKey) {
+    final normalized = _normalizeText(productKey)
+        .replaceAll('\u00e4', 'ae')
+        .replaceAll('\u00f6', 'oe')
+        .replaceAll('\u00fc', 'ue')
+        .replaceAll('\u00df', 'ss');
+    final tokens = normalized
+        .split(' ')
+        .where((token) => token.trim().isNotEmpty)
+        .toList();
+    if (tokens.isEmpty) return '';
+
+    final withoutUnit = [...tokens];
+    if (withoutUnit.isNotEmpty && _knownUnits.contains(withoutUnit.last)) {
+      withoutUnit.removeLast();
+    }
+
+    final trimmed = withoutUnit
+        .where((token) => !RegExp(r'^\d+$').hasMatch(token))
+        .take(5)
+        .toList();
+    return _titleCaseWords(trimmed.join(' ').trim());
+  }
+
+  String _normalizeUnitToken(String unit) {
+    final normalized = unit.trim().toLowerCase();
+    if (normalized == 'paket') return 'pack';
+    if (normalized == 'stueck') return 'stk';
+    return normalized;
+  }
+
+  Future<List<ProductInputSuggestion>> fetchProductInputSuggestions(
+    String query,
+  ) async {
+    final clean = query.trim();
+    if (clean.length < 2) return const [];
+
+    final uri = Uri.parse('$baseUrl/providers/austria-prices').replace(
+      queryParameters: {
+        'stores': 'billa,spar,lidl,hofer',
+        'search': clean,
+        'limit': '1200',
+      },
+    );
+
+    final response = await http.get(uri);
+    if (response.statusCode >= 400) {
+      return const [];
+    }
+
+    final payload = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (payload['items'] as List<dynamic>)
+        .map((entry) => entry as Map<String, dynamic>)
+        .toList();
+
+    final grouped = <String, Map<String, dynamic>>{};
+    for (final item in items) {
+      final productKey = item['product_key'] as String? ?? '';
+      final displayName = _extractDisplayNameFromProductKey(productKey);
+      if (displayName.length < 2) continue;
+
+      final normalizedName = _normalizeText(displayName);
+      final unit = _normalizeUnitToken(
+        (item['package_unit'] as String?) ?? 'stk',
+      );
+      final brand = _extractBrandCandidateFromProductKey(productKey);
+
+      final group = grouped.putIfAbsent(
+        normalizedName,
+        () => {
+          'name': displayName,
+          'count': 0,
+          'units': <String>{},
+          'brands': <String>{},
+        },
+      );
+      group['count'] = (group['count'] as int) + 1;
+      (group['units'] as Set<String>).add(unit);
+      if (brand != null) {
+        (group['brands'] as Set<String>).add(brand);
+      }
+    }
+
+    final suggestions = grouped.values.toList()
+      ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+
+    return suggestions.take(30).map((entry) {
+      final units = (entry['units'] as Set<String>).toList()..sort();
+      final brands = (entry['brands'] as Set<String>).toList()..sort();
+      final defaultUnit = units.isNotEmpty ? units.first : 'stk';
+      return ProductInputSuggestion(
+        name: entry['name'] as String,
+        defaultUnit: defaultUnit,
+        unitOptions: units.isNotEmpty ? units : ['stk'],
+        brandOptions: brands,
+      );
+    }).toList();
   }
 
   Future<List<String>> fetchBrandSuggestions(String productQuery) async {
@@ -201,7 +324,8 @@ class ApiClient {
       throw Exception('Parse failed: ${response.body}');
     }
 
-    return ParsedItem.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ParsedItem.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<DetourDecision> evaluateDetour({
@@ -345,8 +469,9 @@ class ApiClient {
           final storeId = (record['store_id'] as String? ?? '').toLowerCase();
           return storeId.contains(storeKey);
         }).toList();
-        final candidates =
-            storeRecords.where((record) => _recordMatchesItem(record, item)).toList();
+        final candidates = storeRecords
+            .where((record) => _recordMatchesItem(record, item))
+            .toList();
         if (candidates.isEmpty) {
           continue;
         }

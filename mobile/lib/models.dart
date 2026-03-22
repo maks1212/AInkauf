@@ -81,7 +81,8 @@ class UserProfile {
         'vehicle_consumption_per_100km': consumptionPer100km,
       if (transitCostPerKmEur != null)
         'transit_cost_per_km_eur': transitCostPerKmEur,
-      if (carryingCapacityKg != null) 'carrying_capacity_kg': carryingCapacityKg,
+      if (carryingCapacityKg != null)
+        'carrying_capacity_kg': carryingCapacityKg,
       if (maxReachableDistanceKm != null)
         'max_reachable_distance_km': maxReachableDistanceKm,
     };
@@ -171,6 +172,20 @@ class ShoppingItem {
       if (estimatedWeightKg != null) 'estimated_weight_kg': estimatedWeightKg,
     };
   }
+}
+
+class ProductInputSuggestion {
+  final String name;
+  final String defaultUnit;
+  final List<String> unitOptions;
+  final List<String> brandOptions;
+
+  ProductInputSuggestion({
+    required this.name,
+    required this.defaultUnit,
+    required this.unitOptions,
+    required this.brandOptions,
+  });
 }
 
 class RouteOption {
