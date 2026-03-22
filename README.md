@@ -88,6 +88,8 @@ Endpoint: `POST /optimization/calculate-optimal-route`
 - Berücksichtigt Traglast-Limit bei `foot`/`bike`
 - Liefert `ranked_options` (gewichteter Score aus Preis + Distanz)
 - Liefert `map_points` fuer eine Kartenvisualisierung
+- Mobile App erstellt danach eine Einkaufs-Checkliste, gruppiert nach Geschaeft (naechstes oben)
+- Artikel lassen sich per Tap als gekauft markieren und wandern in den Verlauf
 
 ### 3) Marken-Alternativen und Ersparnis
 Endpoint: `POST /optimization/brand-alternatives`

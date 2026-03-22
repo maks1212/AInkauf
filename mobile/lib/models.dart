@@ -326,3 +326,41 @@ class BrandAlternativeResult {
     );
   }
 }
+
+class ShoppingChecklistEntry {
+  final String id;
+  final String itemName;
+  final String quantityLabel;
+  final String storeId;
+  final String storeChain;
+  final double storeDistanceKm;
+  final double estimatedLineTotalEur;
+  final DateTime createdAt;
+  final DateTime? purchasedAt;
+
+  ShoppingChecklistEntry({
+    required this.id,
+    required this.itemName,
+    required this.quantityLabel,
+    required this.storeId,
+    required this.storeChain,
+    required this.storeDistanceKm,
+    required this.estimatedLineTotalEur,
+    required this.createdAt,
+    this.purchasedAt,
+  });
+
+  ShoppingChecklistEntry markPurchased(DateTime when) {
+    return ShoppingChecklistEntry(
+      id: id,
+      itemName: itemName,
+      quantityLabel: quantityLabel,
+      storeId: storeId,
+      storeChain: storeChain,
+      storeDistanceKm: storeDistanceKm,
+      estimatedLineTotalEur: estimatedLineTotalEur,
+      createdAt: createdAt,
+      purchasedAt: when,
+    );
+  }
+}

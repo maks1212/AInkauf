@@ -9,6 +9,7 @@ class ApiClient {
   ApiClient({required this.baseUrl});
 
   final String baseUrl;
+  List<Map<String, dynamic>> _lastLiveRecords = [];
 
   static const Set<String> _brandTokenIgnore = {
     'billa',
@@ -128,9 +129,11 @@ class ApiClient {
       throw Exception('Live price fetch failed: ${response.body}');
     }
     final payload = jsonDecode(response.body) as Map<String, dynamic>;
-    return (payload['items'] as List<dynamic>)
+    final parsed = (payload['items'] as List<dynamic>)
         .map((entry) => entry as Map<String, dynamic>)
         .toList();
+    _lastLiveRecords = parsed;
+    return parsed;
   }
 
   String? _extractBrandCandidateFromProductKey(String productKey) {
@@ -311,6 +314,76 @@ class ApiClient {
     return RoutePlanResult.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
+  }
+
+  List<ShoppingChecklistEntry> buildShoppingChecklist({
+    required List<ShoppingItem> shoppingItems,
+    required RoutePlanResult routePlan,
+  }) {
+    final records = _lastLiveRecords;
+    if (records.isEmpty) return [];
+
+    String optionStoreKey(RouteOption option) {
+      final key = option.storeId.toLowerCase();
+      if (!key.contains('-')) return key;
+      return key.split('-').first;
+    }
+
+    final optionsByDistance = [...routePlan.rankedOptions]
+      ..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+    final createdAt = DateTime.now();
+    final checklist = <ShoppingChecklistEntry>[];
+
+    for (var index = 0; index < shoppingItems.length; index++) {
+      final item = shoppingItems[index];
+      RouteOption? selectedOption;
+      double? selectedLineTotal;
+
+      for (final option in optionsByDistance) {
+        final storeKey = optionStoreKey(option);
+        final storeRecords = records.where((record) {
+          final storeId = (record['store_id'] as String? ?? '').toLowerCase();
+          return storeId.contains(storeKey);
+        }).toList();
+        final candidates =
+            storeRecords.where((record) => _recordMatchesItem(record, item)).toList();
+        if (candidates.isEmpty) {
+          continue;
+        }
+        candidates.sort(
+          (a, b) => (a['price_eur'] as num).compareTo(b['price_eur'] as num),
+        );
+        final lineTotal = _lineTotalFromRecord(candidates.first, item);
+        if (selectedLineTotal == null || lineTotal < selectedLineTotal) {
+          selectedOption = option;
+          selectedLineTotal = lineTotal;
+        }
+      }
+
+      if (selectedOption == null || selectedLineTotal == null) {
+        continue;
+      }
+
+      checklist.add(
+        ShoppingChecklistEntry(
+          id: 'task-${createdAt.millisecondsSinceEpoch}-$index',
+          itemName: item.name,
+          quantityLabel: '${item.quantity} ${item.unit}',
+          storeId: selectedOption.storeId,
+          storeChain: selectedOption.chain,
+          storeDistanceKm: selectedOption.distanceKm,
+          estimatedLineTotalEur: selectedLineTotal,
+          createdAt: createdAt,
+        ),
+      );
+    }
+
+    checklist.sort((a, b) {
+      final byDistance = a.storeDistanceKm.compareTo(b.storeDistanceKm);
+      if (byDistance != 0) return byDistance;
+      return a.storeChain.compareTo(b.storeChain);
+    });
+    return checklist;
   }
 
   Future<BrandAlternativeResult> getBrandAlternatives({

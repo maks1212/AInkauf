@@ -387,6 +387,8 @@ class _PlannerScreenState extends State<PlannerScreen> {
 
   late UserProfile profile;
   final List<ShoppingItem> items = [];
+  final List<ShoppingChecklistEntry> checklistOpen = [];
+  final List<ShoppingChecklistEntry> checklistHistory = [];
   RoutePlanResult? routeResult;
   BrandAlternativeResult? alternatives;
   bool loading = false;
@@ -548,9 +550,17 @@ class _PlannerScreenState extends State<PlannerScreen> {
       final brandSuggestions = await widget.api.getBrandAlternatives(
         shoppingItems: items,
       );
+      final checklist = widget.api.buildShoppingChecklist(
+        shoppingItems: items,
+        routePlan: optimized,
+      );
       setState(() {
         routeResult = optimized;
         alternatives = brandSuggestions;
+        checklistOpen
+          ..clear()
+          ..addAll(checklist);
+        checklistHistory.clear();
       });
     } catch (e) {
       setState(() {
@@ -669,6 +679,112 @@ class _PlannerScreenState extends State<PlannerScreen> {
         .toList()
       ..sort();
     return filtered.take(12).toList();
+  }
+
+  void _markChecklistItemPurchased(ShoppingChecklistEntry entry) {
+    setState(() {
+      checklistOpen.removeWhere((item) => item.id == entry.id);
+      checklistHistory.add(entry.markPurchased(DateTime.now()));
+    });
+  }
+
+  Widget _buildChecklistSection() {
+    if (routeResult == null || (checklistOpen.isEmpty && checklistHistory.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+
+    final grouped = <String, List<ShoppingChecklistEntry>>{};
+    for (final entry in checklistOpen) {
+      grouped.putIfAbsent(entry.storeId, () => []).add(entry);
+    }
+    final groupedEntries = grouped.entries.toList()
+      ..sort((a, b) {
+        final distanceCompare =
+            a.value.first.storeDistanceKm.compareTo(b.value.first.storeDistanceKm);
+        if (distanceCompare != 0) {
+          return distanceCompare;
+        }
+        return a.value.first.storeChain.compareTo(b.value.first.storeChain);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 14),
+        const Text(
+          'Einkaufsliste nach Geschaeft',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Nahe Geschaefte stehen oben. Tippen markiert als gekauft.',
+          style: TextStyle(color: Colors.black54),
+        ),
+        const SizedBox(height: 8),
+        ...groupedEntries.map((group) {
+          final first = group.value.first;
+          final sortedItems = [...group.value]
+            ..sort((a, b) => a.itemName.compareTo(b.itemName));
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${first.storeChain} • ${first.storeDistanceKm.toStringAsFixed(1)} km',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  ...sortedItems.map(
+                    (entry) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.check_box_outline_blank),
+                      title: Text('${entry.quantityLabel} ${entry.itemName}'),
+                      subtitle: Text(
+                        '~${entry.estimatedLineTotalEur.toStringAsFixed(2)} EUR',
+                      ),
+                      onTap: () => _markChecklistItemPurchased(entry),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+        if (checklistHistory.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text(
+            'Verlauf (gekauft)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          ...checklistHistory
+              .reversed
+              .map(
+                (entry) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.check_box,
+                    color: Colors.green,
+                  ),
+                  title: Text(
+                    '${entry.quantityLabel} ${entry.itemName}',
+                    style: const TextStyle(
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${entry.storeChain} • '
+                    '${entry.purchasedAt?.toLocal().toIso8601String().substring(11, 16) ?? ''}',
+                  ),
+                ),
+              ),
+        ],
+      ],
+    );
   }
 
   List<RouteOption> _sortedOptions() {
@@ -1094,6 +1210,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
               child: Text(error!, style: const TextStyle(color: Colors.red)),
             ),
           _buildAlternativeSection(),
+          _buildChecklistSection(),
           _buildResultSection(),
         ],
       ),
