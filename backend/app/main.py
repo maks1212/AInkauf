@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .algorithm import calculate_optimal_route, detour_check, suggest_brand_alternatives
 from .nlp import parse_free_text_item
@@ -20,6 +21,16 @@ from .schemas import (
 
 app = FastAPI(title="AInkauf API", version="0.1.0")
 provider = MockHeisspreiseProvider()
+
+# Web frontend runs on a separate origin during development (e.g. :8090).
+# Allow cross-origin JSON requests so onboarding/optimization calls work in browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
