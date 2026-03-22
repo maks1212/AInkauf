@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: ainkauf-db
+    environment:
+      POSTGRES_DB: ainkauf
+      POSTGRES_USER: ainkauf
+      POSTGRES_PASSWORD: ainkauf
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+  api:
+    build:
+      context: ./backend
+    container_name: ainkauf-api
+    environment:
+      DATABASE_URL: postgresql+psycopg://ainkauf:ainkauf@db:5432/ainkauf
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  db_data:
