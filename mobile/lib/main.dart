@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -192,7 +193,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: mode,
+            initialValue: mode,
             decoration: const InputDecoration(labelText: 'Mobilitaetsvariante'),
             items: const [
               DropdownMenuItem(value: 'car', child: Text('Auto')),
@@ -216,7 +217,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           if (mode == 'car') ...[
             DropdownButtonFormField<String>(
-              value: fuelType,
+              initialValue: fuelType,
               decoration: const InputDecoration(labelText: 'Antriebsart'),
               items: const [
                 DropdownMenuItem(value: 'benzin', child: Text('Benzin')),
@@ -481,6 +482,67 @@ class _PlannerScreenState extends State<PlannerScreen> {
     return markers;
   }
 
+  Widget _buildMapSection() {
+    if (kIsWeb) {
+      return Container(
+        height: 260,
+        decoration: BoxDecoration(
+          color: Colors.teal.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.teal.withValues(alpha: 0.25)),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Kartenansicht (Web-Fallback)',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Falls Google Maps im Browser nicht verfuegbar ist, werden die Marktpunkte hier als Liste angezeigt.',
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                children: (routeResult?.mapPoints ?? [])
+                    .map(
+                      (point) => ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(point.chain),
+                        subtitle: Text(
+                          '(${point.lat.toStringAsFixed(4)}, ${point.lng.toStringAsFixed(4)})',
+                        ),
+                        trailing: Text(
+                          '${point.estimatedTotalEur.toStringAsFixed(2)} EUR',
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 260,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(profile.lat, profile.lng),
+            zoom: 12.5,
+          ),
+          markers: _markers(),
+        ),
+      ),
+    );
+  }
+
   Widget _buildResultSection() {
     if (routeResult == null) return const SizedBox.shrink();
     final options = _sortedOptions();
@@ -495,19 +557,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 260,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(profile.lat, profile.lng),
-                zoom: 12.5,
-              ),
-              markers: _markers(),
-            ),
-          ),
-        ),
+        _buildMapSection(),
         const SizedBox(height: 10),
         SegmentedButton<SortMode>(
           segments: const [
@@ -618,7 +668,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   DropdownButtonFormField<String>(
-                    value: profile.transportMode,
+                    initialValue: profile.transportMode,
                     decoration:
                         const InputDecoration(labelText: 'Transportmodus'),
                     items: const [
