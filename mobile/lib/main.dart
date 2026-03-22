@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
 import 'models.dart';
@@ -362,6 +363,7 @@ class PlannerScreen extends StatefulWidget {
 }
 
 class _PlannerScreenState extends State<PlannerScreen> {
+  static const String _priceSourceUrl = 'https://heisse-preise.io';
   static const List<String> _itemFallbackSuggestions = [
     'Gouda',
     'Schinken',
@@ -664,6 +666,16 @@ class _PlannerScreenState extends State<PlannerScreen> {
           updatingLocation = false;
         });
       }
+    }
+  }
+
+  Future<void> _openPriceSourceLink() async {
+    final uri = Uri.parse(_priceSourceUrl);
+    final launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!launched && mounted) {
+      setState(() {
+        error = 'Konnte Preisquelle nicht oeffnen: $_priceSourceUrl';
+      });
     }
   }
 
@@ -1220,6 +1232,16 @@ class _PlannerScreenState extends State<PlannerScreen> {
                   const Text(
                     'Einkaufsliste',
                     style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _openPriceSourceLink,
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text(
+                        'Preisquelle: Heisse-Preise.io',
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 6),
                   TextField(
