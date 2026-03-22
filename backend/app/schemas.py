@@ -204,6 +204,8 @@ class LivePricePreviewItem(BaseModel):
     price_eur: float
     date: str
     source: str
+    package_quantity: float | None = None
+    package_unit: str | None = None
 
 
 class LivePricePreviewResponse(BaseModel):

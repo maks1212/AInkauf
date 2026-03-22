@@ -60,6 +60,15 @@ def _is_chain_no_name_offer(offer: StoreProductOffer) -> tuple[bool, str | None]
     return False, None
 
 
+def _normalized_quantity_for_pricing(quantity: float, unit: str) -> float:
+    normalized_unit = _normalize_token(unit)
+    if normalized_unit in {"g"}:
+        return quantity / 1000.0
+    if normalized_unit in {"ml"}:
+        return quantity / 1000.0
+    return quantity
+
+
 def haversine_km(a: Location, b: Location) -> float:
     radius = 6371.0
     d_lat = math.radians(b.lat - a.lat)
@@ -238,8 +247,9 @@ def suggest_brand_alternatives(
                 if reason == "chain_policy":
                     budget_reference = alternative_offer.brand
 
-        preferred_total = preferred_offer.price_eur * item.quantity
-        alternative_total = alternative_offer.price_eur * item.quantity
+        normalized_quantity = _normalized_quantity_for_pricing(item.quantity, item.unit)
+        preferred_total = preferred_offer.price_eur * normalized_quantity
+        alternative_total = alternative_offer.price_eur * normalized_quantity
         savings = preferred_total - alternative_total
 
         if savings <= 0:

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
 
@@ -8,6 +9,117 @@ class ApiClient {
   ApiClient({required this.baseUrl});
 
   final String baseUrl;
+
+  static const Map<String, List<String>> _storeSearchKeys = {
+    'billa': ['billa'],
+    'spar': ['spar'],
+    'lidl': ['lidl'],
+    'hofer': ['hofer'],
+  };
+
+  static const Map<String, Map<String, double>> _storeOffsets = {
+    'billa': {'lat': 0.006, 'lng': -0.004},
+    'spar': {'lat': 0.004, 'lng': 0.003},
+    'lidl': {'lat': 0.011, 'lng': -0.010},
+    'hofer': {'lat': 0.018, 'lng': 0.012},
+  };
+
+  String _normalizeText(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
+  }
+
+  List<String> _searchTermsFromItems(List<ShoppingItem> items) {
+    final terms = <String>{};
+    for (final item in items) {
+      final normalized = _normalizeText(item.name);
+      for (final token in normalized.split(' ')) {
+        if (token.length >= 3) {
+          terms.add(token);
+        }
+      }
+    }
+    return terms.toList();
+  }
+
+  ({String unitFamily, double quantity}) _toBaseQuantity(double value, String unit) {
+    final normalizedUnit = unit.trim().toLowerCase();
+    if (normalizedUnit == 'g') {
+      return (unitFamily: 'mass', quantity: value / 1000.0);
+    }
+    if (normalizedUnit == 'kg') {
+      return (unitFamily: 'mass', quantity: value);
+    }
+    if (normalizedUnit == 'ml') {
+      return (unitFamily: 'volume', quantity: value / 1000.0);
+    }
+    if (normalizedUnit == 'l') {
+      return (unitFamily: 'volume', quantity: value);
+    }
+    if (normalizedUnit == 'stk' ||
+        normalizedUnit == 'stueck' ||
+        normalizedUnit == 'stück' ||
+        normalizedUnit == 'pack' ||
+        normalizedUnit == 'paket') {
+      return (unitFamily: 'count', quantity: value);
+    }
+    return (unitFamily: 'unknown', quantity: value);
+  }
+
+  bool _recordMatchesItem(Map<String, dynamic> record, ShoppingItem item) {
+    final key = _normalizeText(record['product_key'] as String? ?? '');
+    final itemTokens = _normalizeText(item.name)
+        .split(' ')
+        .where((token) => token.length >= 3)
+        .toList();
+    if (itemTokens.isEmpty) {
+      return key.contains(_normalizeText(item.name));
+    }
+    return itemTokens.any((token) => key.contains(token));
+  }
+
+  double _lineTotalFromRecord(Map<String, dynamic> record, ShoppingItem item) {
+    final price = (record['price_eur'] as num).toDouble();
+    final packageUnit =
+        (record['package_unit'] as String?)?.trim().toLowerCase() ?? item.unit;
+    final packageQuantity = ((record['package_quantity'] as num?)?.toDouble() ?? 1.0)
+        .clamp(0.0001, 1000000)
+        .toDouble();
+
+    final requested = _toBaseQuantity(item.quantity, item.unit);
+    final package = _toBaseQuantity(packageQuantity, packageUnit);
+
+    if (requested.unitFamily == package.unitFamily &&
+        requested.unitFamily != 'unknown') {
+      final ratio = requested.quantity / math.max(package.quantity, 0.0001);
+      final packagesNeeded = math.max(1, ratio.ceil());
+      return price * packagesNeeded;
+    }
+
+    final fallbackQuantity = _toBaseQuantity(item.quantity, item.unit).quantity;
+    return price * math.max(1, fallbackQuantity);
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchLivePriceRecords(
+    List<ShoppingItem> shoppingItems,
+  ) async {
+    final searchTerms = _searchTermsFromItems(shoppingItems);
+    final query = <String, String>{
+      'stores': 'billa,spar,lidl,hofer',
+      'limit': '5000',
+      if (searchTerms.isNotEmpty) 'search': searchTerms.join(','),
+    };
+    final uri = Uri.parse('$baseUrl/providers/austria-prices').replace(
+      queryParameters: query,
+    );
+    final response = await http.get(uri);
+    if (response.statusCode >= 400) {
+      throw Exception('Live price fetch failed: ${response.body}');
+    }
+    final payload = jsonDecode(response.body) as Map<String, dynamic>;
+    return (payload['items'] as List<dynamic>)
+        .map((entry) => entry as Map<String, dynamic>)
+        .toList();
+  }
 
   Future<ParsedItem> parseItem(String text) async {
     final response = await http.post(
@@ -69,42 +181,49 @@ class ApiClient {
     required UserProfile profile,
     required List<ShoppingItem> shoppingItems,
   }) async {
-    final quantitySum = shoppingItems.fold<double>(
-      0,
-      (sum, item) => sum + item.quantity,
-    );
-    final baseBasket = 8 + (quantitySum * 1.4);
+    final records = await _fetchLivePriceRecords(shoppingItems);
+    if (records.isEmpty) {
+      throw Exception('Keine Live-Preisdaten fuer die Einkaufsliste gefunden.');
+    }
 
-    final stores = [
-      {
-        'store_id': 'spar-1010',
-        'chain': 'Spar',
-        'location': {'lat': profile.lat + 0.004, 'lng': profile.lng + 0.003},
-        'basket_total_eur': (baseBasket * 1.00),
-        'missing_items': 0,
-      },
-      {
-        'store_id': 'billa-1020',
-        'chain': 'Billa',
-        'location': {'lat': profile.lat + 0.006, 'lng': profile.lng - 0.004},
-        'basket_total_eur': (baseBasket * 1.04),
-        'missing_items': 0,
-      },
-      {
-        'store_id': 'hofer-1040',
-        'chain': 'Hofer',
-        'location': {'lat': profile.lat + 0.018, 'lng': profile.lng + 0.012},
-        'basket_total_eur': (baseBasket * 0.90),
-        'missing_items': 0,
-      },
-      {
-        'store_id': 'lidl-1050',
-        'chain': 'Lidl',
-        'location': {'lat': profile.lat + 0.011, 'lng': profile.lng - 0.01},
-        'basket_total_eur': (baseBasket * 0.94),
-        'missing_items': 0,
-      },
-    ];
+    final stores = <Map<String, dynamic>>[];
+    for (final entry in _storeSearchKeys.entries) {
+      final storeKey = entry.key;
+      final chainName =
+          '${storeKey[0].toUpperCase()}${storeKey.substring(1).toLowerCase()}';
+      final offsets = _storeOffsets[storeKey]!;
+      final storeRecords = records.where((record) {
+        final storeId = (record['store_id'] as String? ?? '').toLowerCase();
+        return entry.value.any((needle) => storeId.contains(needle));
+      }).toList();
+
+      double basketTotal = 0;
+      int missingItems = 0;
+      for (final item in shoppingItems) {
+        final candidates = storeRecords
+            .where((record) => _recordMatchesItem(record, item))
+            .toList();
+        if (candidates.isEmpty) {
+          missingItems += 1;
+          continue;
+        }
+        candidates.sort(
+          (a, b) => (a['price_eur'] as num).compareTo(b['price_eur'] as num),
+        );
+        basketTotal += _lineTotalFromRecord(candidates.first, item);
+      }
+
+      stores.add({
+        'store_id': '$storeKey-live',
+        'chain': chainName,
+        'location': {
+          'lat': profile.lat + offsets['lat']!,
+          'lng': profile.lng + offsets['lng']!,
+        },
+        'basket_total_eur': basketTotal,
+        'missing_items': missingItems,
+      });
+    }
 
     final payload = {
       'shopping_list': shoppingItems.map((item) => item.toJson()).toList(),
@@ -131,35 +250,35 @@ class ApiClient {
   Future<BrandAlternativeResult> getBrandAlternatives({
     required List<ShoppingItem> shoppingItems,
   }) async {
+    final liveRecords = await _fetchLivePriceRecords(shoppingItems);
     final offers = <Map<String, dynamic>>[];
-    for (final item in shoppingItems) {
-      final category = item.category ?? 'Sonstiges';
-      if (item.preferredBrand != null && item.preferredBrand!.isNotEmpty) {
-        offers.add({
-          'store_id': 'billa-1020',
-          'chain': 'Billa',
-          'product_name': item.name,
-          'brand': item.preferredBrand,
-          'category': category,
-          'unit': item.unit,
-          'price_eur': 2.20,
-          'is_brand_product': true,
-        });
-      }
+    for (final record in liveRecords) {
+      final storeId = (record['store_id'] as String?) ?? 'unknown';
+      final chain = storeId.split('-').first;
+      final productKey = (record['product_key'] as String?) ?? '';
+      final productName = productKey.replaceAll('_', ' ');
+      final tokens = _normalizeText(productName).split(' ');
+      final extractedBrand = tokens.isNotEmpty ? tokens.first : 'unknown';
+      final packageUnit = (record['package_unit'] as String?) ?? 'stk';
+
       offers.add({
-        'store_id': 'hofer-1040',
-        'chain': 'Hofer',
-        'product_name': item.name,
-        'brand': 'Eigenmarke',
-        'category': category,
-        'unit': item.unit,
-        'price_eur': 1.55,
+        'store_id': storeId,
+        'chain': chain.isEmpty
+            ? 'Unknown'
+            : '${chain[0].toUpperCase()}${chain.substring(1)}',
+        'product_name': productName,
+        'brand': extractedBrand,
+        'category': 'Sonstiges',
+        'unit': packageUnit,
+        'price_eur': record['price_eur'],
+        'is_brand_product': true,
       });
     }
 
     final payload = {
       'shopping_list': shoppingItems.map((item) => item.toJson()).toList(),
       'offers': offers,
+      'prefer_no_name': true,
     };
 
     final response = await http.post(

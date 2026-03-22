@@ -105,11 +105,12 @@ Endpoint: `POST /onboarding/initialize`
 
 - validiert Standort und Mobilitaetsvariante
 - legt sinnvolle Default-Werte fuer Fuss-/Rad-Reichweite und Traglast fest
+- Mobile App nutzt optional echte Geraete-Geolokalisierung ("Aktuellen Standort verwenden")
 
 ### 5) Live-Datenquellen (Österreich)
 - **Supermarktpreise (real):** heisse-preise.io Canonical-Datasets
   - Endpoint: `GET /providers/austria-prices`
-  - Optional: `stores=billa,spar,lidl`
+  - Optional: `stores=billa,spar,lidl` und `search=schinken,gouda`
 - **Spritpreise (real):** E-Control Public API
   - Endpoint: `GET /providers/fuel-price-live?lat=...&lng=...&fuel_type=diesel`
 - **API-Katalog fuer Research/Integrationen:**
@@ -238,6 +239,12 @@ curl "http://localhost:8000/providers/fuel-price-live?lat=48.2082&lng=16.3738&fu
 
 ```bash
 curl "http://localhost:8000/providers/austria-prices?stores=billa,spar&limit=20"
+```
+
+### Live-Supermarktpreise gefiltert (z. B. Schinken/Gouda)
+
+```bash
+curl "http://localhost:8000/providers/austria-prices?stores=billa&search=schinken,gouda&limit=20"
 ```
 
 ### Provider-Katalog (Research)

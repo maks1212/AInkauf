@@ -104,10 +104,14 @@ def onboarding_initialize(req: OnboardingInitializeRequest) -> OnboardingInitial
 
 @app.get("/providers/austria-prices", response_model=LivePricePreviewResponse)
 async def austria_prices_preview(
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=20000),
     stores: str | None = Query(
         default=None,
         description="Optional comma-separated store keys (e.g. billa,spar,lidl)",
+    ),
+    search: str | None = Query(
+        default=None,
+        description="Optional comma-separated search terms applied to product_key.",
     ),
 ) -> LivePricePreviewResponse:
     provider = live_price_provider
@@ -118,6 +122,14 @@ async def austria_prices_preview(
         provider = HeisspreiseLiveProvider(store_keys=store_keys)
 
     records = await provider.fetch_daily_prices(date.today())
+    if search:
+        terms = [term.strip().casefold() for term in search.split(",") if term.strip()]
+        if terms:
+            records = [
+                record
+                for record in records
+                if any(term in record.product_key.casefold() for term in terms)
+            ]
     if not records:
         raise HTTPException(
             status_code=502,
@@ -138,6 +150,8 @@ async def austria_prices_preview(
                 price_eur=record.price_eur,
                 date=record.date.isoformat(),
                 source=record.source,
+                package_quantity=record.package_quantity,
+                package_unit=record.package_unit,
             )
             for record in records[:limit]
         ],

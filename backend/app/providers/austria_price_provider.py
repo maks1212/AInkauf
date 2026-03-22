@@ -14,6 +14,8 @@ class PriceRecord:
     price_eur: float
     date: date
     source: str
+    package_quantity: float | None = None
+    package_unit: str | None = None
 
 
 class AustriaPriceProvider(Protocol):
@@ -40,6 +42,8 @@ class MockHeisspreiseProvider:
                 price_eur=2.49,
                 date=day,
                 source="mock-heisspreise",
+                package_quantity=1.0,
+                package_unit="kg",
             ),
             PriceRecord(
                 store_id="hofer-1040",
@@ -47,6 +51,8 @@ class MockHeisspreiseProvider:
                 price_eur=2.19,
                 date=day,
                 source="mock-heisspreise",
+                package_quantity=1.0,
+                package_unit="kg",
             ),
         ]
 
@@ -111,7 +117,7 @@ class HeisspreiseLiveProvider:
 
             unit = data[i]
             i += 1
-            _quantity = data[i]
+            quantity = data[i]
             i += 1
             _is_weighted = data[i] == 1
             i += 1
@@ -135,6 +141,8 @@ class HeisspreiseLiveProvider:
                     price_eur=selected_price,
                     date=selected_day,
                     source="heisse-preise.io",
+                    package_quantity=float(quantity) if quantity is not None else None,
+                    package_unit=str(unit) if unit is not None else None,
                 )
             )
         return result

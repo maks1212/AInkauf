@@ -126,3 +126,44 @@ def test_brand_alternative_prefers_chain_budget_brand_for_billa():
     assert suggestion.alternative_brand == "clever"
     assert suggestion.alternative_type == "no_name"
     assert suggestion.chain_budget_reference == "clever"
+
+
+def test_brand_alternative_normalizes_gram_quantities():
+    result = suggest_brand_alternatives(
+        shopping_list=[
+            ShoppingListItemInput(
+                name="Schinken",
+                quantity=500,
+                unit="g",
+                preferred_brand="MarkeX",
+                category="Wurst",
+            )
+        ],
+        offers=[
+            StoreProductOffer(
+                store_id="s1",
+                chain="Spar",
+                product_name="Schinken MarkeX 500g",
+                brand="MarkeX",
+                category="Wurst",
+                unit="g",
+                price_eur=16.0,
+                is_brand_product=True,
+            ),
+            StoreProductOffer(
+                store_id="s2",
+                chain="Spar",
+                product_name="Schinken S-Budget 500g",
+                brand="s-budget",
+                category="Wurst",
+                unit="g",
+                price_eur=10.0,
+                is_brand_product=True,
+            ),
+        ],
+    )
+    assert len(result.suggestions) == 1
+    suggestion = result.suggestions[0]
+    assert suggestion.preferred_total_eur == 8.0
+    assert suggestion.alternative_total_eur == 5.0
+    assert suggestion.savings_eur == 3.0
