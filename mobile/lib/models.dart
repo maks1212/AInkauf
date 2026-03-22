@@ -1,0 +1,50 @@
+class ParsedItem {
+  final double quantity;
+  final String unit;
+  final String productName;
+
+  ParsedItem({
+    required this.quantity,
+    required this.unit,
+    required this.productName,
+  });
+
+  factory ParsedItem.fromJson(Map<String, dynamic> json) {
+    return ParsedItem(
+      quantity: (json['quantity'] as num).toDouble(),
+      unit: json['unit'] as String,
+      productName: json['product_name'] as String,
+    );
+  }
+}
+
+class DetourDecision {
+  final bool isWorthIt;
+  final double grossSavingsEur;
+  final double mobilityCostEur;
+  final double fuelCostEur;
+  final double netSavingsEur;
+  final String explanation;
+
+  DetourDecision({
+    required this.isWorthIt,
+    required this.grossSavingsEur,
+    required this.mobilityCostEur,
+    required this.fuelCostEur,
+    required this.netSavingsEur,
+    required this.explanation,
+  });
+
+  factory DetourDecision.fromJson(Map<String, dynamic> json) {
+    final mobilityCost =
+        (json['mobility_cost_eur'] ?? json['fuel_cost_eur']) as num;
+    return DetourDecision(
+      isWorthIt: json['is_worth_it'] as bool,
+      grossSavingsEur: (json['gross_savings_eur'] as num).toDouble(),
+      mobilityCostEur: mobilityCost.toDouble(),
+      fuelCostEur: (json['fuel_cost_eur'] as num).toDouble(),
+      netSavingsEur: (json['net_savings_eur'] as num).toDouble(),
+      explanation: json['explanation'] as String,
+    );
+  }
+}
