@@ -829,10 +829,13 @@ class _PlannerScreenState extends State<PlannerScreen> {
   }
 
   bool _isBrandAllowed(String brandInput) {
-    final allowed = _combinedBrandSuggestions(itemNameController.text)
-        .map((entry) => entry.toLowerCase())
-        .toSet();
-    return allowed.contains(brandInput.toLowerCase());
+    final normalizedInput = brandInput.trim().toLowerCase();
+    if (normalizedInput.isEmpty) return true;
+    final allowed = <String>{
+      ...dynamicBrandSuggestions,
+      ..._brandFallbackSuggestions,
+    }.map((entry) => entry.trim().toLowerCase()).toSet();
+    return allowed.contains(normalizedInput);
   }
 
   void _markChecklistItemPurchased(ShoppingChecklistEntry entry) {
@@ -1326,7 +1329,14 @@ class _PlannerScreenState extends State<PlannerScreen> {
                       return _combinedBrandSuggestions(textEditingValue.text);
                     },
                     onSelected: (selection) {
-                      itemBrandController.text = selection;
+                      setState(() {
+                        itemBrandController.text = selection;
+                        dynamicBrandSuggestions = {
+                          ...dynamicBrandSuggestions,
+                          selection,
+                        }.toList();
+                        error = null;
+                      });
                     },
                     fieldViewBuilder: (
                       context,
