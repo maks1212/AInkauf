@@ -306,6 +306,7 @@ class PlannerScreen extends StatefulWidget {
 }
 
 class _PlannerScreenState extends State<PlannerScreen> {
+  final quickInputController = TextEditingController(text: '3kg Aepfel');
   final itemNameController = TextEditingController();
   final itemQuantityController = TextEditingController(text: '1');
   final itemUnitController = TextEditingController(text: 'stk');
@@ -318,6 +319,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
   RoutePlanResult? routeResult;
   BrandAlternativeResult? alternatives;
   bool loading = false;
+  bool quickAdding = false;
   String? error;
   SortMode sortMode = SortMode.weighted;
 
@@ -329,6 +331,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
 
   @override
   void dispose() {
+    quickInputController.dispose();
     itemNameController.dispose();
     itemQuantityController.dispose();
     itemUnitController.dispose();
@@ -407,6 +410,37 @@ class _PlannerScreenState extends State<PlannerScreen> {
       itemCategoryController.clear();
       itemWeightController.clear();
     });
+  }
+
+  Future<void> _quickAddFromText() async {
+    if (quickInputController.text.trim().isEmpty) return;
+    setState(() {
+      quickAdding = true;
+      error = null;
+    });
+    try {
+      final parsed = await widget.api.parseItem(quickInputController.text.trim());
+      setState(() {
+        items.add(
+          ShoppingItem(
+            name: parsed.productName,
+            quantity: parsed.quantity,
+            unit: parsed.unit,
+          ),
+        );
+        quickInputController.clear();
+      });
+    } catch (e) {
+      setState(() {
+        error = 'Freitext konnte nicht verarbeitet werden: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          quickAdding = false;
+        });
+      }
+    }
   }
 
   Future<void> _runOptimization() async {
@@ -703,6 +737,22 @@ class _PlannerScreenState extends State<PlannerScreen> {
                     'Einkaufsliste',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: quickInputController,
+                    decoration: const InputDecoration(
+                      labelText: 'Schnell hinzufuegen, z.B. 3kg Aepfel',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  FilledButton.tonalIcon(
+                    onPressed: quickAdding ? null : _quickAddFromText,
+                    icon: const Icon(Icons.auto_awesome),
+                    label: Text(
+                      quickAdding ? 'Verarbeite...' : 'Per NLP hinzufuegen',
+                    ),
+                  ),
+                  const Divider(height: 18),
                   TextField(
                     controller: itemNameController,
                     decoration: const InputDecoration(labelText: 'Artikel'),

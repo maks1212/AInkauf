@@ -22,7 +22,8 @@ Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Mobilitaetskosten ein
 │   │   ├── models.py
 │   │   ├── nlp.py
 │   │   ├── providers
-│   │   │   └── austria_price_provider.py
+│   │   │   ├── austria_price_provider.py
+│   │   │   └── fuel_provider.py
 │   │   └── schemas.py
 │   ├── sql
 │   │   └── schema.sql
@@ -98,6 +99,17 @@ Endpoint: `POST /onboarding/initialize`
 
 - validiert Standort und Mobilitaetsvariante
 - legt sinnvolle Default-Werte fuer Fuss-/Rad-Reichweite und Traglast fest
+
+### 5) Live-Datenquellen (Österreich)
+- **Supermarktpreise (real):** heisse-preise.io Canonical-Datasets
+  - Endpoint: `GET /providers/austria-prices`
+  - Optional: `stores=billa,spar,lidl`
+- **Spritpreise (real):** E-Control Public API
+  - Endpoint: `GET /providers/fuel-price-live?lat=...&lng=...&fuel_type=diesel`
+
+Hinweis:
+- Falls Live-Supermarktquelle nicht erreichbar ist, faellt der Endpoint auf Mock-Daten zurueck.
+- Die Demo-Storeliste in der mobilen Optimierungsanfrage wird aktuell noch synthetisch erzeugt; fuer Produktion sollte sie aus den Live-Produktdaten gebaut werden.
 
 ## Backend starten
 
@@ -206,4 +218,16 @@ curl -X POST http://localhost:8000/optimization/calculate-optimal-route \
       }
     ]
   }'
+```
+
+### Live-Fuel-Preis von E-Control
+
+```bash
+curl "http://localhost:8000/providers/fuel-price-live?lat=48.2082&lng=16.3738&fuel_type=diesel"
+```
+
+### Live-Supermarktpreise (Heisse-Preise)
+
+```bash
+curl "http://localhost:8000/providers/austria-prices?stores=billa,spar&limit=20"
 ```

@@ -185,6 +185,31 @@ class OnboardingInitializeResponse(BaseModel):
     defaults: dict[str, float]
 
 
+class LiveFuelQuoteResponse(BaseModel):
+    fuel_type: FuelType
+    price_eur_per_unit: float
+    station_name: str
+    station_address: str | None = None
+    distance_km: float | None = None
+    source: str
+    note: str | None = None
+
+
+class LivePricePreviewItem(BaseModel):
+    store_id: str
+    product_key: str
+    price_eur: float
+    date: str
+    source: str
+
+
+class LivePricePreviewResponse(BaseModel):
+    source: str
+    count: int
+    returned: int
+    items: list[LivePricePreviewItem]
+
+
 class ParseRequest(BaseModel):
     text: str = Field(..., min_length=1)
 
