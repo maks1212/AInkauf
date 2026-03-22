@@ -116,7 +116,7 @@ Endpoint: `POST /onboarding/initialize`
   - Endpoint: `GET /providers/catalog`
 
 Hinweis:
-- Falls Live-Supermarktquelle nicht erreichbar ist, faellt der Endpoint auf Mock-Daten zurueck.
+- Es gibt **keinen Mock-Fallback** mehr fuer diesen Endpoint: wenn die Live-Quelle nicht verfuegbar ist, liefert die API einen Fehler.
 - Die Demo-Storeliste in der mobilen Optimierungsanfrage wird aktuell noch synthetisch erzeugt; fuer Produktion sollte sie aus den Live-Produktdaten gebaut werden.
 
 ## Backend starten

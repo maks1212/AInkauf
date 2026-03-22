@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .algorithm import calculate_optimal_route, detour_check, suggest_brand_alternatives
 from .nlp import parse_free_text_item
-from .providers.austria_price_provider import HeisspreiseLiveProvider, MockHeisspreiseProvider
+from .providers.austria_price_provider import HeisspreiseLiveProvider
 from .providers.fuel_provider import EControlFuelProvider
 from .schemas import (
     BrandAlternativeRequest,
@@ -27,7 +27,6 @@ from .schemas import (
 )
 
 app = FastAPI(title="AInkauf API", version="0.1.0")
-mock_price_provider = MockHeisspreiseProvider()
 live_price_provider = HeisspreiseLiveProvider()
 fuel_provider = EControlFuelProvider()
 
@@ -119,14 +118,17 @@ async def austria_prices_preview(
         provider = HeisspreiseLiveProvider(store_keys=store_keys)
 
     records = await provider.fetch_daily_prices(date.today())
-    source = "heisse-preise.io"
-
     if not records:
-        records = await mock_price_provider.fetch_daily_prices(date.today())
-        source = "mock-heisspreise"
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "No live grocery price records available from heisse-preise.io "
+                "for the requested store selection."
+            ),
+        )
 
     return LivePricePreviewResponse(
-        source=source,
+        source="heisse-preise.io",
         count=len(records),
         returned=min(limit, len(records)),
         items=[
@@ -203,6 +205,15 @@ def providers_catalog() -> ProviderCatalogResponse:
                 notes="Global crowdsourced receipt prices; useful as enrichment and fallback.",
                 auth_required=False,
                 docs_url="https://prices.openfoodfacts.org/api/docs",
+            ),
+            ProviderCatalogItem(
+                id="preisrunter-api",
+                domain="grocery",
+                data_type="aggregated retailer prices",
+                status="candidate",
+                notes="Austrian price aggregation API with limited free tier and API key access.",
+                auth_required=True,
+                docs_url="https://preisrunter.at/api/",
             ),
         ]
     )

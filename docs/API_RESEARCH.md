@@ -31,6 +31,7 @@ Status:
 Limitations:
 - Data freshness differs by chain; some chains have reduced or stopped updates at times.
 - Product matching still needs stronger normalization (EAN/GTIN, pack conversion) for production-grade basket totals.
+- Official public APIs from Spar/Billa/Hofer/Lidl for full product pricing were not found.
 
 ## 3) Candidate grocery augmentation APIs
 
@@ -45,9 +46,18 @@ Use case:
 Status:
 - Not integrated yet (tracked as candidate source).
 
+### Preisrunter API (candidate, Austria-focused aggregator)
+- Docs: `https://preisrunter.at/api/`
+- Type: aggregated Austrian retailer prices
+- Access: API key / terms-based usage
+
+Status:
+- Not integrated yet (tracked as candidate source).
+
 ## 4) Recommendation for production setup
 
 1. Keep E-Control as primary fuel source.
 2. Keep Heisse-Preise as primary grocery source for Austrian chains.
-3. Add a product identity layer (EAN/GTIN + unit normalization) before route optimization.
-4. Add EV charging API if `strom` should be fully live.
+3. Add Preisrunter/OpenFoodFacts as secondary enrichment feeds.
+4. Add a product identity layer (EAN/GTIN + unit normalization) before route optimization.
+5. Add EV charging API if `strom` should be fully live.

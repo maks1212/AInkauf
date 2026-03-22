@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -117,6 +118,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String fuelType = 'benzin';
   String? error;
   bool saving = false;
+  bool locatingPosition = false;
 
   @override
   void dispose() {
@@ -169,6 +171,48 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  Future<void> _useCurrentLocation() async {
+    setState(() {
+      locatingPosition = true;
+      error = null;
+    });
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Standortdienste sind deaktiviert.');
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Standortfreigabe wurde nicht erteilt.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      setState(() {
+        latController.text = position.latitude.toStringAsFixed(6);
+        lngController.text = position.longitude.toStringAsFixed(6);
+      });
+    } catch (e) {
+      setState(() {
+        error = 'Standort konnte nicht gelesen werden: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          locatingPosition = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -190,6 +234,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             controller: lngController,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(labelText: 'Laengengrad (Lng)'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: locatingPosition ? null : _useCurrentLocation,
+            icon: const Icon(Icons.my_location),
+            label: Text(
+              locatingPosition
+                  ? 'Standort wird gelesen...'
+                  : 'Aktuellen Standort verwenden',
+            ),
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
@@ -320,6 +374,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
   BrandAlternativeResult? alternatives;
   bool loading = false;
   bool quickAdding = false;
+  bool updatingLocation = false;
   String? error;
   SortMode sortMode = SortMode.weighted;
 
@@ -474,6 +529,59 @@ class _PlannerScreenState extends State<PlannerScreen> {
       if (mounted) {
         setState(() {
           loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _updateLocationFromDevice() async {
+    setState(() {
+      updatingLocation = true;
+      error = null;
+    });
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Standortdienste sind deaktiviert.');
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Standortfreigabe wurde nicht erteilt.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      final updatedProfile = UserProfile(
+        lat: position.latitude,
+        lng: position.longitude,
+        transportMode: profile.transportMode,
+        fuelType: profile.fuelType,
+        consumptionPer100km: profile.consumptionPer100km,
+        energyPricePerUnit: profile.energyPricePerUnit,
+        transitCostPerKmEur: profile.transitCostPerKmEur,
+        carryingCapacityKg: profile.carryingCapacityKg,
+        maxReachableDistanceKm: profile.maxReachableDistanceKm,
+      );
+
+      setState(() {
+        profile = updatedProfile;
+      });
+      await widget.onProfileChanged(updatedProfile);
+    } catch (e) {
+      setState(() {
+        error = 'Standort konnte nicht aktualisiert werden: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          updatingLocation = false;
         });
       }
     }
@@ -700,6 +808,20 @@ class _PlannerScreenState extends State<PlannerScreen> {
                   const Text(
                     'Mobilitaet',
                     style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'Standort: ${profile.lat.toStringAsFixed(5)}, '
+                    '${profile.lng.toStringAsFixed(5)}',
+                  ),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(
+                    onPressed: updatingLocation ? null : _updateLocationFromDevice,
+                    icon: const Icon(Icons.gps_fixed),
+                    label: Text(
+                      updatingLocation
+                          ? 'Aktualisiere Standort...'
+                          : 'Standort aktualisieren',
+                    ),
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: profile.transportMode,
