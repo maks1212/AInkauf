@@ -10,6 +10,8 @@ from .providers.fuel_provider import EControlFuelProvider
 from .schemas import (
     BrandAlternativeRequest,
     BrandAlternativeResponse,
+    ProviderCatalogItem,
+    ProviderCatalogResponse,
     DetourCheckRequest,
     DetourCheckResponse,
     FuelType,
@@ -81,6 +83,7 @@ def brand_alternatives(req: BrandAlternativeRequest) -> BrandAlternativeResponse
     return suggest_brand_alternatives(
         shopping_list=req.shopping_list,
         offers=req.offers,
+        prefer_no_name=req.prefer_no_name,
     )
 
 
@@ -167,4 +170,39 @@ async def fuel_price_live(
         distance_km=quote.distance_km,
         source=quote.source,
         note=quote.note,
+    )
+
+
+@app.get("/providers/catalog", response_model=ProviderCatalogResponse)
+def providers_catalog() -> ProviderCatalogResponse:
+    return ProviderCatalogResponse(
+        items=[
+            ProviderCatalogItem(
+                id="econtrol-sprit",
+                domain="fuel",
+                data_type="station prices",
+                status="live",
+                notes="Official Austrian fuel station prices for DIE/SUP/GAS via public API.",
+                auth_required=False,
+                docs_url="https://api.e-control.at/sprit/1.0/doc/index.html",
+            ),
+            ProviderCatalogItem(
+                id="heisse-preise",
+                domain="grocery",
+                data_type="product prices",
+                status="live",
+                notes="Austrian supermarket product datasets in compressed canonical JSON files.",
+                auth_required=False,
+                docs_url="https://heisse-preise.io/",
+            ),
+            ProviderCatalogItem(
+                id="openfoodfacts-open-prices",
+                domain="grocery",
+                data_type="crowdsourced prices",
+                status="candidate",
+                notes="Global crowdsourced receipt prices; useful as enrichment and fallback.",
+                auth_required=False,
+                docs_url="https://prices.openfoodfacts.org/api/docs",
+            ),
+        ]
     )

@@ -154,6 +154,7 @@ class StoreProductOffer(BaseModel):
 class BrandAlternativeRequest(BaseModel):
     shopping_list: list[ShoppingListItemInput]
     offers: list[StoreProductOffer]
+    prefer_no_name: bool = True
 
 
 class BrandAlternativeSuggestion(BaseModel):
@@ -167,6 +168,8 @@ class BrandAlternativeSuggestion(BaseModel):
     alternative_chain: str
     alternative_total_eur: float
     savings_eur: float
+    alternative_type: str = "generic"
+    chain_budget_reference: str | None = None
 
 
 class BrandAlternativeResponse(BaseModel):
@@ -208,6 +211,20 @@ class LivePricePreviewResponse(BaseModel):
     count: int
     returned: int
     items: list[LivePricePreviewItem]
+
+
+class ProviderCatalogItem(BaseModel):
+    id: str
+    domain: str
+    data_type: str
+    status: str
+    notes: str
+    auth_required: bool = False
+    docs_url: str | None = None
+
+
+class ProviderCatalogResponse(BaseModel):
+    items: list[ProviderCatalogItem]
 
 
 class ParseRequest(BaseModel):

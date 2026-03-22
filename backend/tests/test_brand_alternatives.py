@@ -37,6 +37,7 @@ def test_brand_alternative_suggestion_with_savings():
     )
     assert len(result.suggestions) == 1
     assert result.total_potential_savings_eur == 1.2
+    assert result.suggestions[0].alternative_type == "no_name"
 
 
 def test_brand_alternative_no_suggestion_when_not_cheaper():
@@ -74,3 +75,54 @@ def test_brand_alternative_no_suggestion_when_not_cheaper():
     )
     assert len(result.suggestions) == 0
     assert result.total_potential_savings_eur == 0
+
+
+def test_brand_alternative_prefers_chain_budget_brand_for_billa():
+    result = suggest_brand_alternatives(
+        shopping_list=[
+            ShoppingListItemInput(
+                name="Nudeln",
+                quantity=1,
+                unit="pack",
+                preferred_brand="Barilla",
+                category="Teigwaren",
+            )
+        ],
+        offers=[
+            StoreProductOffer(
+                store_id="b1",
+                chain="Billa",
+                product_name="Barilla Nudeln 500g",
+                brand="Barilla",
+                category="Teigwaren",
+                unit="pack",
+                price_eur=2.69,
+                is_brand_product=True,
+            ),
+            StoreProductOffer(
+                store_id="b2",
+                chain="Billa",
+                product_name="Clever Nudeln 500g",
+                brand="clever",
+                category="Teigwaren",
+                unit="pack",
+                price_eur=1.19,
+                is_brand_product=True,
+            ),
+            StoreProductOffer(
+                store_id="h1",
+                chain="Hofer",
+                product_name="Premium Pasta 500g",
+                brand="La Molisana",
+                category="Teigwaren",
+                unit="pack",
+                price_eur=0.99,
+                is_brand_product=True,
+            ),
+        ],
+    )
+    assert len(result.suggestions) == 1
+    suggestion = result.suggestions[0]
+    assert suggestion.alternative_brand == "clever"
+    assert suggestion.alternative_type == "no_name"
+    assert suggestion.chain_budget_reference == "clever"

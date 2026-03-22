@@ -18,6 +18,47 @@ from .schemas import (
     UserContext,
 )
 
+NO_NAME_BRANDS_BY_CHAIN: dict[str, set[str]] = {
+    "spar": {"s-budget", "s budget"},
+    "billa": {"clever"},
+    "hofer": {
+        "eigenmarke",
+        "milfina",
+        "milsani",
+        "rio d'oro",
+        "zurueck zum ursprung",
+    },
+    "lidl": {
+        "eigenmarke",
+        "milbona",
+        "chef select",
+        "combino",
+        "w5",
+        "cien",
+        "lupilu",
+    },
+}
+
+
+def _normalize_token(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.strip().casefold().replace("_", " ").replace("-", " ")
+
+
+def _is_chain_no_name_offer(offer: StoreProductOffer) -> tuple[bool, str | None]:
+    chain_key = _normalize_token(offer.chain)
+    chain_policy = NO_NAME_BRANDS_BY_CHAIN.get(chain_key)
+    offer_brand = _normalize_token(offer.brand)
+
+    if not offer.is_brand_product:
+        return True, "non_brand_flag"
+
+    if chain_policy and offer_brand in chain_policy:
+        return True, "chain_policy"
+
+    return False, None
+
 
 def haversine_km(a: Location, b: Location) -> float:
     radius = 6371.0
@@ -143,6 +184,7 @@ def _distance_from_user(req: RouteRequest, store_id: str, store_location: Locati
 def suggest_brand_alternatives(
     shopping_list: list[ShoppingListItemInput],
     offers: list[StoreProductOffer],
+    prefer_no_name: bool = True,
 ) -> BrandAlternativeResponse:
     suggestions: list[BrandAlternativeSuggestion] = []
 
@@ -178,6 +220,24 @@ def suggest_brand_alternatives(
             continue
 
         alternative_offer = min(alternative_pool, key=lambda x: x.price_eur)
+        alternative_type = "generic"
+        budget_reference = None
+
+        if prefer_no_name:
+            no_name_pool: list[StoreProductOffer] = []
+            for candidate in alternative_pool:
+                is_no_name, reason = _is_chain_no_name_offer(candidate)
+                if is_no_name:
+                    no_name_pool.append(candidate)
+                    if reason == "chain_policy" and budget_reference is None:
+                        budget_reference = candidate.brand
+            if no_name_pool:
+                alternative_offer = min(no_name_pool, key=lambda x: x.price_eur)
+                alternative_type = "no_name"
+                is_no_name, reason = _is_chain_no_name_offer(alternative_offer)
+                if reason == "chain_policy":
+                    budget_reference = alternative_offer.brand
+
         preferred_total = preferred_offer.price_eur * item.quantity
         alternative_total = alternative_offer.price_eur * item.quantity
         savings = preferred_total - alternative_total
@@ -197,6 +257,8 @@ def suggest_brand_alternatives(
                 alternative_chain=alternative_offer.chain,
                 alternative_total_eur=round(alternative_total, 2),
                 savings_eur=round(savings, 2),
+                alternative_type=alternative_type,
+                chain_budget_reference=budget_reference,
             )
         )
 

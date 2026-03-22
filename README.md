@@ -8,6 +8,7 @@ Die erste Einkaufsliste, die mitdenkt: Preise vergleichen, Mobilitaetskosten ein
 - **Backend API:** FastAPI (Python)
 - **Datenbank:** PostgreSQL + PostGIS
 - **Routen:** Google Maps Distance Matrix API (MVP-Connector vorbereitet)
+- **API Research:** `docs/API_RESEARCH.md`
 
 ## Projektstruktur
 
@@ -93,6 +94,11 @@ Endpoint: `POST /optimization/brand-alternatives`
 
 - Wenn ein Artikel `preferred_brand` hat, sucht die API guenstigere Alternativen
 - Antwort enthaelt konkrete Vorschlaege pro Artikel plus `total_potential_savings_eur`
+- No-Name-Prio pro Kette (wenn verfuegbar):
+  - Spar -> `s-budget`
+  - Billa -> `clever`
+  - Hofer -> Eigenmarken (z. B. milfina/milsani/rio d'oro)
+  - Lidl -> Eigenmarken (z. B. milbona/combino/cien/w5)
 
 ### 4) Erststart-Onboarding
 Endpoint: `POST /onboarding/initialize`
@@ -106,6 +112,8 @@ Endpoint: `POST /onboarding/initialize`
   - Optional: `stores=billa,spar,lidl`
 - **Spritpreise (real):** E-Control Public API
   - Endpoint: `GET /providers/fuel-price-live?lat=...&lng=...&fuel_type=diesel`
+- **API-Katalog fuer Research/Integrationen:**
+  - Endpoint: `GET /providers/catalog`
 
 Hinweis:
 - Falls Live-Supermarktquelle nicht erreichbar ist, faellt der Endpoint auf Mock-Daten zurueck.
@@ -230,4 +238,10 @@ curl "http://localhost:8000/providers/fuel-price-live?lat=48.2082&lng=16.3738&fu
 
 ```bash
 curl "http://localhost:8000/providers/austria-prices?stores=billa,spar&limit=20"
+```
+
+### Provider-Katalog (Research)
+
+```bash
+curl "http://localhost:8000/providers/catalog"
 ```
