@@ -237,3 +237,99 @@ class ParseResponse(BaseModel):
     quantity: float
     unit: str
     product_name: str
+
+
+class PricePlatformChainItem(BaseModel):
+    code: str
+    display_name: str
+    tier: int = Field(..., ge=1)
+
+
+class PricePlatformChainsResponse(BaseModel):
+    items: list[PricePlatformChainItem]
+
+
+class PricePlatformStoreItem(BaseModel):
+    store_id: str
+    chain: str
+    name: str
+    lat: float
+    lng: float
+    address: str
+    distance_km: float | None = Field(default=None, ge=0)
+
+
+class PricePlatformStoresResponse(BaseModel):
+    items: list[PricePlatformStoreItem]
+
+
+class PricePlatformPriceRecord(BaseModel):
+    store_id: str
+    product_key: str
+    product_name: str
+    brand: str | None = None
+    category: str
+    package_quantity: float = Field(..., gt=0)
+    package_unit: str
+    price_eur: float = Field(..., ge=0)
+    price_type: str
+    valid_from: str
+    valid_to: str | None = None
+    source: str
+    promotion_type: str | None = None
+    promotion_label: str | None = None
+
+
+class PricePlatformCurrentPriceResponse(BaseModel):
+    item: PricePlatformPriceRecord
+
+
+class PricePlatformPriceHistoryResponse(BaseModel):
+    items: list[PricePlatformPriceRecord]
+
+
+class PricePlatformPromotionResponse(BaseModel):
+    items: list[PricePlatformPriceRecord]
+
+
+class PricePlatformBasketQuoteItem(BaseModel):
+    product_key: str
+    quantity: float = Field(..., gt=0)
+    unit: str
+
+
+class PricePlatformBasketQuoteRequest(BaseModel):
+    items: list[PricePlatformBasketQuoteItem]
+    store_ids: list[str] | None = None
+    on_date: str | None = None
+
+
+class PricePlatformBasketQuoteLine(BaseModel):
+    product_key: str
+    requested_quantity: float
+    requested_unit: str
+    found: bool
+    reason: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    package_quantity: float | None = None
+    package_unit: str | None = None
+    package_count: int | None = None
+    unit_price_eur: float | None = None
+    line_total_eur: float | None = None
+    valid_from: str | None = None
+    valid_to: str | None = None
+    price_type: str | None = None
+
+
+class PricePlatformBasketQuoteStore(BaseModel):
+    store_id: str
+    chain: str
+    store_name: str
+    missing_items: int = Field(..., ge=0)
+    subtotal_eur: float = Field(..., ge=0)
+    line_items: list[PricePlatformBasketQuoteLine]
+
+
+class PricePlatformBasketQuoteResponse(BaseModel):
+    quotes: list[PricePlatformBasketQuoteStore]
