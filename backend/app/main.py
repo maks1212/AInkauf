@@ -2,10 +2,11 @@ from datetime import date
 from datetime import datetime
 from contextlib import asynccontextmanager
 from html import escape
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .algorithm import calculate_optimal_route, detour_check, suggest_brand_alternatives
 from .nlp import parse_free_text_item
@@ -693,26 +694,380 @@ def admin_bootstrap_persistence() -> dict:
     return {"bootstrapped": True}
 
 
+def _ui_params(
+    *,
+    offers_page: int = 1,
+    offers_page_size: int = 25,
+    offers_needs_review: str = "all",
+    reviews_page: int = 1,
+    reviews_page_size: int = 25,
+    reviews_status: str = "pending",
+    notice: str | None = None,
+    error: str | None = None,
+) -> dict[str, str]:
+    params = {
+        "offers_page": str(max(1, offers_page)),
+        "offers_page_size": str(max(1, min(200, offers_page_size))),
+        "offers_needs_review": offers_needs_review,
+        "reviews_page": str(max(1, reviews_page)),
+        "reviews_page_size": str(max(1, min(200, reviews_page_size))),
+        "reviews_status": reviews_status,
+    }
+    if notice:
+        params["notice"] = notice
+    if error:
+        params["error"] = error
+    return params
+
+
+def _redirect_ui(params: dict[str, str]) -> RedirectResponse:
+    return RedirectResponse(
+        url=f"/admin/scraper/ui?{urlencode(params)}",
+        status_code=303,
+    )
+
+
+def _safe_return_url(return_url: str | None) -> str | None:
+    if return_url and return_url.startswith("/admin/scraper/ui"):
+        return return_url
+    return None
+
+
+@app.post("/admin/scraper/form/jobs/start")
+async def admin_form_start_job(
+    stores_csv: str = Form(default="billa,spar,lidl"),
+    simulate: bool = Form(default=False),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    stores = [entry.strip() for entry in stores_csv.split(",") if entry.strip()]
+    try:
+        await admin_start_job({"stores": stores, "simulate": simulate})
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Job gestartet"))
+    except HTTPException as exc:
+        return _redirect_ui(_ui_params(error=f"Job-Start fehlgeschlagen: {exc.detail}"))
+
+
+@app.post("/admin/scraper/form/config/update")
+def admin_form_update_config(
+    enabled: bool = Form(default=False),
+    interval_minutes: int = Form(default=180),
+    max_parallel_stores: int = Form(default=4),
+    retries: int = Form(default=2),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    admin_update_config(
+        {
+            "enabled": enabled,
+            "interval_minutes": interval_minutes,
+            "max_parallel_stores": max_parallel_stores,
+            "retries": retries,
+        }
+    )
+    safe = _safe_return_url(return_url)
+    if safe:
+        return RedirectResponse(url=safe, status_code=303)
+    return _redirect_ui(_ui_params(notice="Konfiguration gespeichert"))
+
+
+@app.post("/admin/scraper/form/bootstrap")
+def admin_form_bootstrap(return_url: str | None = Form(default=None)) -> RedirectResponse:
+    try:
+        admin_bootstrap_persistence()
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Persistence bootstrap erfolgreich"))
+    except HTTPException as exc:
+        return _redirect_ui(_ui_params(error=f"Bootstrap fehlgeschlagen: {exc.detail}"))
+
+
+@app.post("/admin/scraper/form/catalog/create")
+def admin_form_create_catalog(
+    name: str = Form(...),
+    brand: str = Form(default=""),
+    serial_number: str = Form(default=""),
+    package_quantity: str = Form(default=""),
+    package_unit: str = Form(default=""),
+    category: str = Form(default=""),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_create_catalog_item(
+            {
+                "name": name,
+                "brand": brand or None,
+                "serial_number": serial_number or None,
+                "package_quantity": float(package_quantity) if package_quantity.strip() else None,
+                "package_unit": package_unit or None,
+                "category": category or None,
+            }
+        )
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Katalog-Artikel erstellt"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Katalog-Create fehlgeschlagen: {exc}"))
+
+
+@app.post("/admin/scraper/form/catalog/update")
+def admin_form_update_catalog(
+    product_id: str = Form(...),
+    name: str = Form(default=""),
+    brand: str = Form(default=""),
+    serial_number: str = Form(default=""),
+    package_quantity: str = Form(default=""),
+    package_unit: str = Form(default=""),
+    category: str = Form(default=""),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_update_catalog_item(
+            product_id,
+            {
+                "name": name,
+                "brand": brand or None,
+                "serial_number": serial_number or None,
+                "package_quantity": float(package_quantity) if package_quantity.strip() else None,
+                "package_unit": package_unit or None,
+                "category": category or None,
+            },
+        )
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Katalog-Artikel aktualisiert"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Katalog-Update fehlgeschlagen: {exc}"))
+
+
+@app.post("/admin/scraper/form/catalog/delete")
+def admin_form_delete_catalog(
+    product_id: str = Form(...),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_delete_catalog_item(product_id)
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Katalog-Artikel geloescht"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Katalog-Delete fehlgeschlagen: {exc}"))
+
+
+@app.post("/admin/scraper/form/offers/update")
+def admin_form_update_offer(
+    offer_id: str = Form(...),
+    price_eur: str = Form(default=""),
+    valid_from: str = Form(default=""),
+    valid_to: str = Form(default=""),
+    price_type: str = Form(default="regular"),
+    promotion_type: str = Form(default=""),
+    promotion_label: str = Form(default=""),
+    canonical_product_id: str = Form(default=""),
+    needs_review: bool = Form(default=False),
+    review_reason: str = Form(default=""),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_update_offer(
+            offer_id,
+            {
+                "price_eur": float(price_eur) if price_eur.strip() else None,
+                "valid_from": valid_from or None,
+                "valid_to": valid_to or None,
+                "price_type": price_type or None,
+                "promotion_type": promotion_type or None,
+                "promotion_label": promotion_label or None,
+                "canonical_product_id": canonical_product_id or None,
+                "needs_review": needs_review,
+                "review_reason": review_reason or None,
+            },
+        )
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Offer aktualisiert"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Offer-Update fehlgeschlagen: {exc}"))
+
+
+@app.post("/admin/scraper/form/offers/delete")
+def admin_form_delete_offer(
+    offer_id: str = Form(...),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_delete_offer(offer_id)
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Offer geloescht"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Offer-Delete fehlgeschlagen: {exc}"))
+
+
+@app.post("/admin/scraper/form/reviews/resolve")
+def admin_form_resolve_review(
+    review_id: str = Form(...),
+    canonical_product_id: str = Form(...),
+    reviewer_note: str = Form(default=""),
+    return_url: str | None = Form(default=None),
+) -> RedirectResponse:
+    try:
+        admin_resolve_review(
+            review_id,
+            {
+                "canonical_product_id": canonical_product_id,
+                "reviewer_note": reviewer_note or None,
+            },
+        )
+        safe = _safe_return_url(return_url)
+        if safe:
+            return RedirectResponse(url=safe, status_code=303)
+        return _redirect_ui(_ui_params(notice="Review aufgeloest"))
+    except Exception as exc:  # noqa: BLE001
+        return _redirect_ui(_ui_params(error=f"Review-Resolve fehlgeschlagen: {exc}"))
+
+
 @app.get("/admin/scraper/ui", response_class=HTMLResponse)
-def admin_scraper_ui() -> str:
-    jobs = scraper_admin_store.list_jobs(limit=20)
-    reviews = scraper_admin_store.list_reviews(status="pending", limit=40)
-    offers = scraper_admin_store.list_offers(needs_review=None, limit=50)
+def admin_scraper_ui(
+    offers_page: int = Query(default=1, ge=1),
+    offers_page_size: int = Query(default=25, ge=1, le=200),
+    offers_needs_review: str = Query(default="all"),
+    reviews_page: int = Query(default=1, ge=1),
+    reviews_page_size: int = Query(default=25, ge=1, le=200),
+    reviews_status: str = Query(default="pending"),
+    notice: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> str:
+    jobs = scraper_admin_store.list_jobs(limit=30)
+    needs_review_filter = None
+    if offers_needs_review.lower() == "true":
+        needs_review_filter = True
+    elif offers_needs_review.lower() == "false":
+        needs_review_filter = False
+
+    offers_limit = min(2000, offers_page * offers_page_size)
+    all_offers = scraper_admin_store.list_offers(
+        needs_review=needs_review_filter,
+        limit=offers_limit,
+    )
+    offers_start = (offers_page - 1) * offers_page_size
+    paged_offers = all_offers[offers_start : offers_start + offers_page_size]
+    offers_has_prev = offers_page > 1
+    offers_has_next = len(all_offers) > offers_start + offers_page_size
+
+    reviews_limit = min(2000, reviews_page * reviews_page_size)
+    all_reviews = scraper_admin_store.list_reviews(status=reviews_status, limit=reviews_limit)
+    reviews_start = (reviews_page - 1) * reviews_page_size
+    paged_reviews = all_reviews[reviews_start : reviews_start + reviews_page_size]
+    reviews_has_prev = reviews_page > 1
+    reviews_has_next = len(all_reviews) > reviews_start + reviews_page_size
+
     catalog = scraper_admin_store.list_canonical_products()
     config = scraper_admin_store.get_config()
     recommendation = scraper_admin_service.scheduling_recommendation()
+    return_url = (
+        "/admin/scraper/ui?"
+        + urlencode(
+            _ui_params(
+                offers_page=offers_page,
+                offers_page_size=offers_page_size,
+                offers_needs_review=offers_needs_review,
+                reviews_page=reviews_page,
+                reviews_page_size=reviews_page_size,
+                reviews_status=reviews_status,
+            )
+        )
+    )
 
-    def _rows(items: list[dict], keys: list[str]) -> str:
+    def _rows(items: list[dict], keys: list[str], actions: str | None = None) -> str:
         if not items:
-            return "<tr><td colspan='99'><em>Keine Daten</em></td></tr>"
+            colspan = len(keys) + (1 if actions else 0)
+            return f"<tr><td colspan='{colspan}'><em>Keine Daten</em></td></tr>"
         rendered = []
         for row in items:
+            action_cell = ""
+            if actions is not None:
+                action_cell = f"<td>{actions.format(**{key: escape(str(value)) for key, value in row.items()})}</td>"
             rendered.append(
                 "<tr>"
                 + "".join(f"<td>{escape(str(row.get(key, '')))}</td>" for key in keys)
+                + action_cell
                 + "</tr>"
             )
         return "".join(rendered)
+
+    catalog_options = "".join(
+        f"<option value='{escape(item['id'])}'>{escape(item['name'])} ({escape(str(item.get('brand') or '-'))})</option>"
+        for item in catalog
+    )
+
+    offers_prev_form = (
+        f"""
+        <form method="get" action="/admin/scraper/ui">
+          <input type="hidden" name="offers_page" value="{offers_page - 1}" />
+          <input type="hidden" name="offers_page_size" value="{offers_page_size}" />
+          <input type="hidden" name="offers_needs_review" value="{escape(offers_needs_review)}" />
+          <input type="hidden" name="reviews_page" value="{reviews_page}" />
+          <input type="hidden" name="reviews_page_size" value="{reviews_page_size}" />
+          <input type="hidden" name="reviews_status" value="{escape(reviews_status)}" />
+          <button type="submit">Offers Zurueck</button>
+        </form>
+        """
+        if offers_has_prev
+        else ""
+    )
+    offers_next_form = (
+        f"""
+        <form method="get" action="/admin/scraper/ui">
+          <input type="hidden" name="offers_page" value="{offers_page + 1}" />
+          <input type="hidden" name="offers_page_size" value="{offers_page_size}" />
+          <input type="hidden" name="offers_needs_review" value="{escape(offers_needs_review)}" />
+          <input type="hidden" name="reviews_page" value="{reviews_page}" />
+          <input type="hidden" name="reviews_page_size" value="{reviews_page_size}" />
+          <input type="hidden" name="reviews_status" value="{escape(reviews_status)}" />
+          <button type="submit">Offers Weiter</button>
+        </form>
+        """
+        if offers_has_next
+        else ""
+    )
+    reviews_prev_form = (
+        f"""
+        <form method="get" action="/admin/scraper/ui">
+          <input type="hidden" name="offers_page" value="{offers_page}" />
+          <input type="hidden" name="offers_page_size" value="{offers_page_size}" />
+          <input type="hidden" name="offers_needs_review" value="{escape(offers_needs_review)}" />
+          <input type="hidden" name="reviews_page" value="{reviews_page - 1}" />
+          <input type="hidden" name="reviews_page_size" value="{reviews_page_size}" />
+          <input type="hidden" name="reviews_status" value="{escape(reviews_status)}" />
+          <button type="submit">Reviews Zurueck</button>
+        </form>
+        """
+        if reviews_has_prev
+        else ""
+    )
+    reviews_next_form = (
+        f"""
+        <form method="get" action="/admin/scraper/ui">
+          <input type="hidden" name="offers_page" value="{offers_page}" />
+          <input type="hidden" name="offers_page_size" value="{offers_page_size}" />
+          <input type="hidden" name="offers_needs_review" value="{escape(offers_needs_review)}" />
+          <input type="hidden" name="reviews_page" value="{reviews_page + 1}" />
+          <input type="hidden" name="reviews_page_size" value="{reviews_page_size}" />
+          <input type="hidden" name="reviews_status" value="{escape(reviews_status)}" />
+          <button type="submit">Reviews Weiter</button>
+        </form>
+        """
+        if reviews_has_next
+        else ""
+    )
 
     return f"""
 <!doctype html>
@@ -729,27 +1084,63 @@ def admin_scraper_ui() -> str:
       th {{ background: #f6f6f6; }}
       .hint {{ color: #444; font-size: 13px; }}
       code {{ background: #f4f4f4; padding: 2px 4px; }}
+      .row-actions form {{ display: inline-block; margin-right: 6px; }}
+      .form-grid {{ display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 8px; }}
+      .pager {{ display: flex; gap: 8px; margin-top: 8px; }}
+      input, select, button {{ font-size: 12px; padding: 5px; }}
+      .ok {{ background: #e8f7e8; border: 1px solid #b5dfb5; padding: 8px; margin-bottom: 10px; }}
+      .err {{ background: #fdecec; border: 1px solid #f2b6b6; padding: 8px; margin-bottom: 10px; }}
     </style>
   </head>
   <body>
     <h1>AInkauf Scraper Admin</h1>
-    <p class="hint">CRUD + Review Queue + Job Start + Scheduler-Konfig. Fuer Schreiben bitte die JSON APIs darunter verwenden.</p>
+    <p class="hint">Alle Funktionen koennen direkt ueber Formulare/Buttons ausgeloesst werden.</p>
+    {"<div class='ok'>" + escape(notice) + "</div>" if notice else ""}
+    {"<div class='err'>" + escape(error) + "</div>" if error else ""}
+
+    <div class="card">
+      <h2>Job starten</h2>
+      <form method="post" action="/admin/scraper/form/jobs/start">
+        <input type="hidden" name="return_url" value="{escape(return_url)}" />
+        <label>Stores CSV <input type="text" name="stores_csv" value="billa,spar,lidl" style="width:320px" /></label>
+        <label><input type="checkbox" name="simulate" /> Simulation</label>
+        <button type="submit">Scraper Job starten</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Konfiguration</h2>
       <p><strong>enabled:</strong> {escape(str(config.get("enabled")))}, <strong>interval_minutes:</strong> {escape(str(config.get("interval_minutes")))}, <strong>max_parallel_stores:</strong> {escape(str(config.get("max_parallel_stores")))}, <strong>retries:</strong> {escape(str(config.get("retries")))}</p>
       <p class="hint">Empfohlenes Intervall: <strong>{escape(str(recommendation.get("recommended_interval_minutes")))}</strong> Minuten. Minimum: {escape(str(recommendation.get("min_interval_minutes")))}.</p>
       <p class="hint">"Ein Thread pro Geschäft" ist nicht empfohlen. Besser: begrenzte Worker (z. B. 4) + Retry/Backoff.</p>
+      <form method="post" action="/admin/scraper/form/config/update">
+        <input type="hidden" name="return_url" value="{escape(return_url)}" />
+        <label><input type="checkbox" name="enabled" {"checked" if config.get("enabled") else ""} /> Scheduler aktiv</label>
+        <label>Intervall (Min) <input type="number" name="interval_minutes" value="{escape(str(config.get("interval_minutes")))}" min="15" /></label>
+        <label>Worker <input type="number" name="max_parallel_stores" value="{escape(str(config.get("max_parallel_stores")))}" min="1" max="16" /></label>
+        <label>Retries <input type="number" name="retries" value="{escape(str(config.get("retries")))}" min="0" max="5" /></label>
+        <button type="submit">Konfiguration speichern</button>
+      </form>
+      <form method="post" action="/admin/scraper/form/bootstrap" style="margin-top:8px;">
+        <input type="hidden" name="return_url" value="{escape(return_url)}" />
+        <button type="submit">Persistence Bootstrap</button>
+      </form>
     </div>
+
     <div class="card">
-      <h2>API Quick Actions</h2>
-      <ul>
-        <li>Job starten: <code>POST /admin/scraper/jobs/start</code> Body: {{"stores":["billa","spar"],"simulate":false}}</li>
-        <li>Scheduler setzen: <code>PATCH /admin/scraper/config</code> Body: {{"enabled":true,"interval_minutes":180,"max_parallel_stores":4,"retries":2}}</li>
-        <li>Katalog CRUD: <code>/admin/scraper/catalog</code></li>
-        <li>Offers CRUD: <code>/admin/scraper/offers</code></li>
-        <li>Review Queue: <code>/admin/scraper/reviews</code> und <code>/admin/scraper/reviews/{{id}}/resolve</code></li>
-      </ul>
+      <h2>Katalog: neuen Artikel anlegen</h2>
+      <form method="post" action="/admin/scraper/form/catalog/create" class="form-grid">
+        <input type="hidden" name="return_url" value="{escape(return_url)}" />
+        <input type="text" name="name" placeholder="Name" required />
+        <input type="text" name="brand" placeholder="Marke" />
+        <input type="text" name="serial_number" placeholder="Seriennummer/EAN" />
+        <input type="number" step="0.001" name="package_quantity" placeholder="Menge" />
+        <input type="text" name="package_unit" placeholder="Einheit" />
+        <input type="text" name="category" placeholder="Kategorie" />
+        <button type="submit">Katalog-Artikel erstellen</button>
+      </form>
     </div>
+
     <div class="card">
       <h2>Jobs</h2>
       <table>
@@ -758,24 +1149,114 @@ def admin_scraper_ui() -> str:
       </table>
     </div>
     <div class="card">
-      <h2>Review Queue (pending)</h2>
+      <h2>Review Queue</h2>
+      <form method="get" action="/admin/scraper/ui">
+        <input type="hidden" name="offers_page" value="{offers_page}" />
+        <input type="hidden" name="offers_page_size" value="{offers_page_size}" />
+        <input type="hidden" name="offers_needs_review" value="{escape(offers_needs_review)}" />
+        <label>Status
+          <select name="reviews_status">
+            <option value="pending" {"selected" if reviews_status == "pending" else ""}>pending</option>
+            <option value="resolved" {"selected" if reviews_status == "resolved" else ""}>resolved</option>
+            <option value="all" {"selected" if reviews_status == "all" else ""}>all</option>
+          </select>
+        </label>
+        <label>Page size <input type="number" name="reviews_page_size" value="{reviews_page_size}" min="1" max="200" /></label>
+        <input type="hidden" name="reviews_page" value="1" />
+        <button type="submit">Review Filter anwenden</button>
+      </form>
       <table>
-        <thead><tr><th>id</th><th>scraped_offer_id</th><th>status</th><th>review_reason</th><th>created_at</th></tr></thead>
-        <tbody>{_rows(reviews, ["id", "scraped_offer_id", "status", "review_reason", "created_at"])}</tbody>
+        <thead><tr><th>id</th><th>scraped_offer_id</th><th>status</th><th>review_reason</th><th>created_at</th><th>Aktion</th></tr></thead>
+        <tbody>{_rows(
+            paged_reviews,
+            ["id", "scraped_offer_id", "status", "review_reason", "created_at"],
+            actions='''
+                <form method="post" action="/admin/scraper/form/reviews/resolve" class="row-actions">
+                  <input type="hidden" name="review_id" value="{id}" />
+                  <input type="hidden" name="return_url" value="''' + escape(return_url) + '''" />
+                  <select name="canonical_product_id" required>
+                    ''' + catalog_options + '''
+                  </select>
+                  <input type="text" name="reviewer_note" placeholder="Notiz" />
+                  <button type="submit">Resolve</button>
+                </form>
+            '''
+        )}</tbody>
       </table>
+      <div class="pager">{reviews_prev_form}{reviews_next_form}</div>
     </div>
     <div class="card">
-      <h2>Offers (letzte 50)</h2>
+      <h2>Offers</h2>
+      <form method="get" action="/admin/scraper/ui">
+        <input type="hidden" name="reviews_page" value="{reviews_page}" />
+        <input type="hidden" name="reviews_page_size" value="{reviews_page_size}" />
+        <input type="hidden" name="reviews_status" value="{escape(reviews_status)}" />
+        <label>needs_review
+          <select name="offers_needs_review">
+            <option value="all" {"selected" if offers_needs_review == "all" else ""}>all</option>
+            <option value="true" {"selected" if offers_needs_review == "true" else ""}>true</option>
+            <option value="false" {"selected" if offers_needs_review == "false" else ""}>false</option>
+          </select>
+        </label>
+        <label>Page size <input type="number" name="offers_page_size" value="{offers_page_size}" min="1" max="200" /></label>
+        <input type="hidden" name="offers_page" value="1" />
+        <button type="submit">Offer Filter anwenden</button>
+      </form>
       <table>
-        <thead><tr><th>id</th><th>source_store_id</th><th>source_product_key</th><th>price_eur</th><th>valid_from</th><th>valid_to</th><th>canonical_product_id</th><th>needs_review</th><th>review_reason</th></tr></thead>
-        <tbody>{_rows(offers, ["id", "source_store_id", "source_product_key", "price_eur", "valid_from", "valid_to", "canonical_product_id", "needs_review", "review_reason"])}</tbody>
+        <thead><tr><th>id</th><th>source_store_id</th><th>source_product_key</th><th>price_eur</th><th>valid_from</th><th>valid_to</th><th>canonical_product_id</th><th>needs_review</th><th>review_reason</th><th>Aktion</th></tr></thead>
+        <tbody>{_rows(
+            paged_offers,
+            ["id", "source_store_id", "source_product_key", "price_eur", "valid_from", "valid_to", "canonical_product_id", "needs_review", "review_reason"],
+            actions='''
+                <form method="post" action="/admin/scraper/form/offers/update" class="row-actions">
+                  <input type="hidden" name="offer_id" value="{id}" />
+                  <input type="hidden" name="return_url" value="''' + escape(return_url) + '''" />
+                  <input type="number" step="0.001" name="price_eur" value="{price_eur}" style="width:80px" />
+                  <select name="price_type">
+                    <option value="regular">regular</option>
+                    <option value="promo">promo</option>
+                  </select>
+                  <input type="text" name="canonical_product_id" value="{canonical_product_id}" placeholder="canonical id" style="width:170px" />
+                  <label><input type="checkbox" name="needs_review" /> review</label>
+                  <input type="text" name="review_reason" value="{review_reason}" placeholder="reason" style="width:120px" />
+                  <button type="submit">Update</button>
+                </form>
+                <form method="post" action="/admin/scraper/form/offers/delete" class="row-actions">
+                  <input type="hidden" name="offer_id" value="{id}" />
+                  <input type="hidden" name="return_url" value="''' + escape(return_url) + '''" />
+                  <button type="submit">Delete</button>
+                </form>
+            '''
+        )}</tbody>
       </table>
+      <div class="pager">{offers_prev_form}{offers_next_form}</div>
     </div>
     <div class="card">
       <h2>Katalog (Canonical Products)</h2>
       <table>
-        <thead><tr><th>id</th><th>name</th><th>brand</th><th>serial_number</th><th>package_quantity</th><th>package_unit</th><th>category</th><th>updated_at</th></tr></thead>
-        <tbody>{_rows(catalog, ["id", "name", "brand", "serial_number", "package_quantity", "package_unit", "category", "updated_at"])}</tbody>
+        <thead><tr><th>id</th><th>name</th><th>brand</th><th>serial_number</th><th>package_quantity</th><th>package_unit</th><th>category</th><th>updated_at</th><th>Aktion</th></tr></thead>
+        <tbody>{_rows(
+            catalog,
+            ["id", "name", "brand", "serial_number", "package_quantity", "package_unit", "category", "updated_at"],
+            actions='''
+                <form method="post" action="/admin/scraper/form/catalog/update" class="row-actions">
+                  <input type="hidden" name="product_id" value="{id}" />
+                  <input type="hidden" name="return_url" value="''' + escape(return_url) + '''" />
+                  <input type="text" name="name" value="{name}" style="width:130px" />
+                  <input type="text" name="brand" value="{brand}" style="width:90px" />
+                  <input type="text" name="serial_number" value="{serial_number}" style="width:120px" />
+                  <input type="text" name="package_quantity" value="{package_quantity}" style="width:70px" />
+                  <input type="text" name="package_unit" value="{package_unit}" style="width:60px" />
+                  <input type="text" name="category" value="{category}" style="width:90px" />
+                  <button type="submit">Update</button>
+                </form>
+                <form method="post" action="/admin/scraper/form/catalog/delete" class="row-actions">
+                  <input type="hidden" name="product_id" value="{id}" />
+                  <input type="hidden" name="return_url" value="''' + escape(return_url) + '''" />
+                  <button type="submit">Delete</button>
+                </form>
+            '''
+        )}</tbody>
       </table>
     </div>
   </body>
