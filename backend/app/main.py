@@ -578,6 +578,89 @@ def admin_list_offers(
     }
 
 
+def _is_consumer_ready_offer(offer: dict, *, min_confidence: float) -> bool:
+    if offer.get("needs_review", True):
+        return False
+    if not offer.get("canonical_product_id"):
+        return False
+    confidence = offer.get("mapping_confidence")
+    if confidence is None or float(confidence) < min_confidence:
+        return False
+    if not offer.get("valid_from"):
+        return False
+    if offer.get("price_type") == "promo" and not offer.get("valid_to"):
+        return False
+    if offer.get("price_eur") is None or float(offer.get("price_eur", 0)) <= 0:
+        return False
+    if (
+        offer.get("source_package_quantity") is None
+        or not offer.get("source_package_unit")
+    ):
+        return False
+    return True
+
+
+@app.get("/admin/scraper/export/ready")
+def admin_export_ready_offers(
+    min_confidence: float = Query(default=0.9, ge=0, le=1),
+    source: str | None = Query(default=None),
+    store_id: str | None = Query(default=None),
+    price_type: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    # Store implementations currently cap list_offers to 2000 records per query.
+    # Pull the max window and apply strict readiness filters in-memory.
+    offers = scraper_admin_store.list_offers(needs_review=False, limit=2000)
+    filtered: list[dict] = []
+    for offer in offers:
+        if not _is_consumer_ready_offer(offer, min_confidence=min_confidence):
+            continue
+        if source and offer.get("source") != source:
+            continue
+        if store_id and offer.get("source_store_id") != store_id:
+            continue
+        if price_type and offer.get("price_type") != price_type:
+            continue
+        filtered.append(offer)
+
+    page = filtered[offset : offset + limit]
+    return {
+        "quality_profile": {
+            "min_confidence": min_confidence,
+            "requires_canonical_product": True,
+            "requires_valid_from": True,
+            "requires_package_quantity_and_unit": True,
+            "promo_requires_valid_to": True,
+        },
+        "count_total_candidates": len(offers),
+        "count_ready": len(filtered),
+        "offset": offset,
+        "limit": limit,
+        "returned": len(page),
+        "items": page,
+    }
+
+
+@app.get("/price-platform/export/ready")
+def price_platform_export_ready(
+    min_confidence: float = Query(default=0.9, ge=0, le=1),
+    source: str | None = Query(default=None),
+    store_id: str | None = Query(default=None),
+    price_type: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    return admin_export_ready_offers(
+        min_confidence=min_confidence,
+        source=source,
+        store_id=store_id,
+        price_type=price_type,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @app.patch("/admin/scraper/offers/{offer_id}")
 def admin_update_offer(offer_id: str, payload: dict) -> dict:
     try:
