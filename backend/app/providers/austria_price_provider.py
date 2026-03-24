@@ -5,6 +5,7 @@ from datetime import date
 from typing import Protocol
 
 import httpx
+import asyncio
 
 
 @dataclass
@@ -66,8 +67,15 @@ class HeisspreiseLiveProvider:
     BASE_URL = "https://heisse-preise.io/data/latest-canonical.{store}.compressed.json"
     DEFAULT_STORE_KEYS = ("billa", "spar", "lidl")
 
-    def __init__(self, store_keys: tuple[str, ...] | None = None):
+    def __init__(
+        self,
+        store_keys: tuple[str, ...] | None = None,
+        max_parallel_stores: int = 4,
+        retries: int = 2,
+    ):
         self.store_keys = store_keys or self.DEFAULT_STORE_KEYS
+        self.max_parallel_stores = max(1, max_parallel_stores)
+        self.retries = max(0, retries)
 
     @staticmethod
     def _decode_date_token(token: str | int) -> date:
@@ -153,20 +161,36 @@ class HeisspreiseLiveProvider:
         store_key: str,
         day: date,
     ) -> list[PriceRecord]:
-        response = await client.get(self.BASE_URL.format(store=store_key))
-        response.raise_for_status()
-        payload = response.json()
-        return self._decompress_records(payload, day)
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                response = await client.get(self.BASE_URL.format(store=store_key))
+                response.raise_for_status()
+                payload = response.json()
+                return self._decompress_records(payload, day)
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt < self.retries:
+                    await asyncio.sleep(0.25 * (2**attempt))
+        if last_error:
+            raise last_error
+        return []
 
     async def fetch_daily_prices(self, day: date) -> list[PriceRecord]:
         records: list[PriceRecord] = []
-        async with httpx.AsyncClient(timeout=30) as client:
-            for store_key in self.store_keys:
+        semaphore = asyncio.Semaphore(self.max_parallel_stores)
+
+        async def _fetch_one(store_key: str) -> list[PriceRecord]:
+            async with semaphore:
                 try:
-                    records.extend(
-                        await self._fetch_store_records(client, store_key, day)
-                    )
+                    return await self._fetch_store_records(client, store_key, day)
                 except httpx.HTTPError:
-                    # Keep provider resilient if one store file is temporarily unavailable.
-                    continue
+                    return []
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            results = await asyncio.gather(
+                *[_fetch_one(store_key) for store_key in self.store_keys]
+            )
+            for chunk in results:
+                records.extend(chunk)
         return records

@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     default_fuel_price_autogas: float = 0.95
     default_energy_price_strom: float = 0.35
     default_transit_cost_per_km: float = 0.40
+    scraper_scheduler_enabled: bool = False
+    scraper_schedule_interval_minutes: int = 180
+    scraper_max_parallel_stores: int = 4
+    scraper_store_fetch_retries: int = 2
 
 
 @lru_cache
