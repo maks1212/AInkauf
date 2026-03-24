@@ -15,6 +15,7 @@ from .price_platform_read_model import BasketItemRequest, PricePlatformReadModel
 from .config import get_settings
 from .scraper_admin_service import ScraperAdminService
 from .scraper_admin_store import ScraperAdminStore
+from .scraper_admin_store_sql import ScraperAdminSqlStore
 from .schemas import (
     BrandAlternativeRequest,
     BrandAlternativeResponse,
@@ -46,7 +47,13 @@ from .schemas import (
 )
 
 settings = get_settings()
-scraper_admin_store = ScraperAdminStore()
+if settings.scraper_admin_use_persistence:
+    scraper_admin_store = ScraperAdminSqlStore()
+    if settings.scraper_admin_auto_create_tables:
+        scraper_admin_store.create_schema()
+        scraper_admin_store.seed_default_chains()
+else:
+    scraper_admin_store = ScraperAdminStore()
 scraper_admin_service = ScraperAdminService(
     store=scraper_admin_store,
     settings=settings,
@@ -669,6 +676,21 @@ async def admin_start_job(payload: dict | None = None) -> dict:
         return {"job": job}
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/admin/scraper/bootstrap")
+def admin_bootstrap_persistence() -> dict:
+    if not isinstance(scraper_admin_store, ScraperAdminSqlStore):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Persistence store is disabled. Set scraper_admin_use_persistence=true "
+                "to use SQL persistence."
+            ),
+        )
+    scraper_admin_store.create_schema()
+    scraper_admin_store.seed_default_chains()
+    return {"bootstrapped": True}
 
 
 @app.get("/admin/scraper/ui", response_class=HTMLResponse)

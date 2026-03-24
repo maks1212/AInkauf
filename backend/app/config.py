@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     scraper_schedule_interval_minutes: int = 180
     scraper_max_parallel_stores: int = 4
     scraper_store_fetch_retries: int = 2
+    scraper_admin_use_persistence: bool = False
+    scraper_admin_auto_create_tables: bool = False
 
 
 @lru_cache

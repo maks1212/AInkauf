@@ -46,6 +46,17 @@ def test_scraper_admin_catalog_crud_and_serial_uniqueness():
 
 
 def test_scraper_admin_job_start_and_offer_review_resolution():
+    # Ensure prior tests/jobs cannot cause a 409 conflict.
+    existing_jobs = client.get("/admin/scraper/jobs")
+    assert existing_jobs.status_code == 200
+    running = existing_jobs.json().get("running", False)
+    if running:
+        for _ in range(60):
+            jobs_poll = client.get("/admin/scraper/jobs")
+            assert jobs_poll.status_code == 200
+            if not jobs_poll.json().get("running", False):
+                break
+
     catalog_create = client.post(
         "/admin/scraper/catalog",
         json={

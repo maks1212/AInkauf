@@ -99,6 +99,8 @@ class ScraperAdminService:
         stores: list[str] | None = None,
         simulate: bool = False,
     ) -> dict[str, Any]:
+        # Ensure we have an active loop before marking job as running.
+        asyncio.get_running_loop()
         selected_stores = [item.strip() for item in (stores or self._default_store_keys()) if item.strip()]
         if not selected_stores:
             selected_stores = self._default_store_keys()
