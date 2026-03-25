@@ -439,6 +439,23 @@ class ScraperAdminStore:
             bounded_limit = max(1, min(limit, 2000))
             return rows[bounded_offset : bounded_offset + bounded_limit]
 
+    def list_events(
+        self,
+        *,
+        offer_id: str | None = None,
+        event_type: str | None = None,
+        actor_type: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        return self.list_offer_events(
+            offer_id=offer_id,
+            event_type=event_type,
+            actor_type=actor_type,
+            limit=limit,
+            offset=offset,
+        )
+
     # ----------------------------
     # Offers + review queue
     # ----------------------------
