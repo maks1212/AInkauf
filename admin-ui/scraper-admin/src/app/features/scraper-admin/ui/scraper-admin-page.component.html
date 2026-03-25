@@ -1,0 +1,468 @@
+<div class="min-h-screen bg-slate-100 text-slate-900">
+  <div class="mx-auto max-w-[1450px] px-4 py-6">
+    <header class="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-semibold">Scraper Admin (Angular)</h1>
+          <p class="mt-1 text-sm text-slate-600">
+            DDD Feature-Slice + Resource Store mit Auto-Reload bei laufenden Jobs.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span
+            class="rounded-full px-3 py-1 text-xs font-medium"
+            [class.bg-emerald-100]="store.running()"
+            [class.text-emerald-700]="store.running()"
+            [class.bg-slate-200]="!store.running()"
+            [class.text-slate-700]="!store.running()"
+          >
+            {{ store.running() ? 'Job laeuft' : 'Idle' }}
+          </span>
+          <button
+            class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            (click)="store.reloadAll()"
+            [disabled]="store.loading()"
+          >
+            Neu laden
+          </button>
+        </div>
+      </div>
+      @if (store.notice()) {
+        <div class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {{ store.notice() }}
+        </div>
+      }
+      @if (store.error()) {
+        <div class="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {{ store.error() }}
+        </div>
+      }
+    </header>
+
+    <section class="mb-6 grid gap-4 lg:grid-cols-2">
+      <article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 class="mb-3 text-lg font-semibold">Job starten</h2>
+        <form class="grid gap-3" (ngSubmit)="startJob()">
+          <label class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">Stores CSV</span>
+            <input
+              class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              type="text"
+              [ngModel]="storesCsv()"
+              (ngModelChange)="storesCsv.set($event)"
+              name="storesCsv"
+            />
+          </label>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              [ngModel]="simulate()"
+              (ngModelChange)="simulate.set($event)"
+              name="simulate"
+            />
+            Simulation
+          </label>
+          <button
+            class="w-fit rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            type="submit"
+            [disabled]="store.busy() !== null"
+          >
+            Starten
+          </button>
+        </form>
+      </article>
+
+      <article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 class="mb-3 text-lg font-semibold">Scheduler Konfiguration</h2>
+        <form class="grid gap-3 md:grid-cols-2" (ngSubmit)="saveConfig()">
+          <label class="inline-flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              [ngModel]="cfgEnabled()"
+              (ngModelChange)="cfgEnabled.set($event)"
+              name="cfgEnabled"
+            />
+            Aktiv
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">Intervall (Min)</span>
+            <input
+              class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              type="number"
+              min="15"
+              [ngModel]="cfgInterval()"
+              (ngModelChange)="cfgInterval.set(+$event)"
+              name="cfgInterval"
+            />
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">Max Parallel Stores</span>
+            <input
+              class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              type="number"
+              min="1"
+              max="16"
+              [ngModel]="cfgWorkers()"
+              (ngModelChange)="cfgWorkers.set(+$event)"
+              name="cfgWorkers"
+            />
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">Retries</span>
+            <input
+              class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              type="number"
+              min="0"
+              max="6"
+              [ngModel]="cfgRetries()"
+              (ngModelChange)="cfgRetries.set(+$event)"
+              name="cfgRetries"
+            />
+          </label>
+          <div class="flex items-end gap-2">
+            <button
+              class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              type="submit"
+            >
+              Speichern
+            </button>
+            <button
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+              type="button"
+              (click)="bootstrapPersistence()"
+            >
+              Bootstrap
+            </button>
+          </div>
+        </form>
+      </article>
+    </section>
+
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 text-lg font-semibold">Katalog anlegen</h2>
+      <form class="grid gap-3 md:grid-cols-4" (ngSubmit)="createCatalogItem()">
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogName()"
+          (ngModelChange)="catalogName.set($event)"
+          name="catalogName"
+          placeholder="Name"
+          required
+        />
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogBrand()"
+          (ngModelChange)="catalogBrand.set($event)"
+          name="catalogBrand"
+          placeholder="Marke"
+        />
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogSerial()"
+          (ngModelChange)="catalogSerial.set($event)"
+          name="catalogSerial"
+          placeholder="Serial / EAN"
+        />
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogQty()"
+          (ngModelChange)="catalogQty.set($event)"
+          name="catalogQty"
+          placeholder="Menge"
+        />
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogUnit()"
+          (ngModelChange)="catalogUnit.set($event)"
+          name="catalogUnit"
+          placeholder="Einheit"
+        />
+        <input
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          [ngModel]="catalogCategory()"
+          (ngModelChange)="catalogCategory.set($event)"
+          name="catalogCategory"
+          placeholder="Kategorie"
+        />
+        <button
+          class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 md:col-span-2"
+          type="submit"
+        >
+          Produkt anlegen
+        </button>
+      </form>
+    </section>
+
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 text-lg font-semibold">Jobs</h2>
+      <div class="overflow-auto">
+        <table class="min-w-full border-collapse text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="border border-slate-200 px-2 py-1 text-left">ID</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Status</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Source</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Stores</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Records</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Matched</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Review</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (job of store.jobs(); track job.id) {
+              <tr>
+                <td class="border border-slate-200 px-2 py-1">{{ job.id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.status }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.source }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.store_count }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.record_count }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.matched_count }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.review_count }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ job.started_at }}</td>
+              </tr>
+            } @empty {
+              <tr>
+                <td class="border border-slate-200 px-2 py-2" colspan="8">Keine Jobs</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="mb-3 flex flex-wrap items-end gap-3">
+        <h2 class="text-lg font-semibold">Offers</h2>
+        <label class="text-sm">
+          needs_review
+          <select
+            class="ml-1 rounded-md border border-slate-300 px-2 py-1"
+            [ngModel]="store.offerFilter()"
+            (ngModelChange)="store.setOfferFilter($event)"
+            name="offerFilter"
+          >
+            <option value="all">all</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+        <label class="text-sm">
+          Page size
+          <input
+            class="ml-1 w-20 rounded-md border border-slate-300 px-2 py-1"
+            type="number"
+            min="1"
+            max="200"
+            [ngModel]="store.offerPageSize()"
+            (ngModelChange)="store.setOfferPageSize(+$event)"
+            name="offerPageSize"
+          />
+        </label>
+      </div>
+
+      <div class="overflow-auto">
+        <table class="min-w-full border-collapse text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="border border-slate-200 px-2 py-1 text-left">ID</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Store</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Produkt</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Preis</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Type</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Canon.</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Review</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (offer of store.pagedOffers(); track offer.id) {
+              <tr>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.source_store_id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.source_product_name }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.price_eur }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.price_type }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.canonical_product_id || '-' }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ offer.needs_review }}</td>
+                <td class="border border-slate-200 px-2 py-1">
+                  <button
+                    class="mr-1 rounded border border-slate-300 px-2 py-1 hover:bg-slate-50"
+                    (click)="toggleOfferReview(offer.id, offer.needs_review)"
+                  >
+                    Toggle Review
+                  </button>
+                  <button
+                    class="rounded border border-rose-300 px-2 py-1 text-rose-700 hover:bg-rose-50"
+                    (click)="deleteOffer(offer.id)"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td class="border border-slate-200 px-2 py-2" colspan="8">Keine Offers</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-3 flex gap-2">
+        <button
+          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          [disabled]="!store.canOfferPrev()"
+          (click)="store.prevOfferPage()"
+        >
+          Zurueck
+        </button>
+        <button
+          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          [disabled]="!store.canOfferNext()"
+          (click)="store.nextOfferPage()"
+        >
+          Weiter
+        </button>
+      </div>
+    </section>
+
+    <section class="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="mb-3 flex flex-wrap items-end gap-3">
+        <h2 class="text-lg font-semibold">Reviews</h2>
+        <label class="text-sm">
+          Status
+          <select
+            class="ml-1 rounded-md border border-slate-300 px-2 py-1"
+            [ngModel]="store.reviewFilter()"
+            (ngModelChange)="store.setReviewFilter($event)"
+            name="reviewFilter"
+          >
+            <option value="pending">pending</option>
+            <option value="resolved">resolved</option>
+            <option value="all">all</option>
+          </select>
+        </label>
+        <label class="text-sm">
+          Page size
+          <input
+            class="ml-1 w-20 rounded-md border border-slate-300 px-2 py-1"
+            type="number"
+            min="1"
+            max="200"
+            [ngModel]="store.reviewPageSize()"
+            (ngModelChange)="store.setReviewPageSize(+$event)"
+            name="reviewPageSize"
+          />
+        </label>
+        <label class="text-sm">
+          Canonical Product
+          <select
+            class="ml-1 rounded-md border border-slate-300 px-2 py-1"
+            [ngModel]="selectedCatalogId()"
+            (ngModelChange)="selectedCatalogId.set($event)"
+            name="selectedCatalogId"
+          >
+            <option value="">Bitte waehlen</option>
+            @for (item of store.catalog(); track item.id) {
+              <option [value]="item.id">{{ item.name }} ({{ item.brand || '-' }})</option>
+            }
+          </select>
+        </label>
+      </div>
+
+      <div class="overflow-auto">
+        <table class="min-w-full border-collapse text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="border border-slate-200 px-2 py-1 text-left">ID</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Offer ID</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Status</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Reason</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (review of store.pagedReviews(); track review.id) {
+              <tr>
+                <td class="border border-slate-200 px-2 py-1">{{ review.id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ review.scraped_offer_id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ review.status }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ review.review_reason || '-' }}</td>
+                <td class="border border-slate-200 px-2 py-1">
+                  <button
+                    class="rounded border border-emerald-300 px-2 py-1 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    [disabled]="!selectedCatalogId()"
+                    (click)="resolveReview(review.id)"
+                  >
+                    Resolve
+                  </button>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td class="border border-slate-200 px-2 py-2" colspan="5">Keine Reviews</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-3 flex gap-2">
+        <button
+          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          [disabled]="!store.canReviewPrev()"
+          (click)="store.prevReviewPage()"
+        >
+          Zurueck
+        </button>
+        <button
+          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          [disabled]="!store.canReviewNext()"
+          (click)="store.nextReviewPage()"
+        >
+          Weiter
+        </button>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 text-lg font-semibold">Catalog (bestehend)</h2>
+      <div class="overflow-auto">
+        <table class="min-w-full border-collapse text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="border border-slate-200 px-2 py-1 text-left">ID</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Name</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Brand</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Serial</th>
+              <th class="border border-slate-200 px-2 py-1 text-left">Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of store.catalog(); track item.id) {
+              <tr>
+                <td class="border border-slate-200 px-2 py-1">{{ item.id }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ item.name }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ item.brand || '-' }}</td>
+                <td class="border border-slate-200 px-2 py-1">{{ item.serial_number || '-' }}</td>
+                <td class="border border-slate-200 px-2 py-1">
+                  <button
+                    class="rounded border border-rose-300 px-2 py-1 text-rose-700 hover:bg-rose-50"
+                    (click)="deleteCatalogItem(item.id)"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td class="border border-slate-200 px-2 py-2" colspan="5">Keine Catalog-Eintraege</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
