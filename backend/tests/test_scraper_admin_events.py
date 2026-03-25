@@ -7,6 +7,7 @@ client = TestClient(app)
 
 
 def test_scraper_event_history_contains_auto_and_manual_decisions():
+    client.post("/admin/scraper/reset")
     catalog = client.post(
         "/admin/scraper/catalog",
         json={

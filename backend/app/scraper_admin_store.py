@@ -337,6 +337,47 @@ class ScraperAdminStore:
 
         return MatchResult(None, None, "no_match", "rule")
 
+    def _ensure_auto_canonical_product(
+        self,
+        *,
+        source_product_name: str,
+        source_brand: str | None,
+        source_package_quantity: float | None,
+        source_package_unit: str | None,
+    ) -> str:
+        normalized_name = _normalize_text(source_product_name)
+        normalized_brand = source_brand.strip().lower() if source_brand else None
+        qty_norm, unit_norm = _normalize_quantity(source_package_quantity, source_package_unit)
+
+        for product in self._canonical_products.values():
+            same_name = product.get("normalized_name") == normalized_name
+            product_brand = (product.get("brand") or "").strip().lower() if product.get("brand") else None
+            same_brand = (product_brand or "") == (normalized_brand or "")
+            p_qty, p_unit = _normalize_quantity(product.get("package_quantity"), product.get("package_unit"))
+            same_size = (
+                qty_norm is None
+                or p_qty is None
+                or (abs(float(p_qty) - float(qty_norm)) < 1e-6 and p_unit == unit_norm)
+            )
+            if same_name and same_brand and same_size:
+                return str(product["id"])
+
+        product_id = str(uuid.uuid4())
+        row = {
+            "id": product_id,
+            "name": source_product_name.strip(),
+            "normalized_name": normalized_name,
+            "brand": source_brand.strip() if source_brand else None,
+            "serial_number": None,
+            "package_quantity": source_package_quantity,
+            "package_unit": _normalize_unit(source_package_unit),
+            "category": None,
+            "created_at": self._utc_now_iso(),
+            "updated_at": self._utc_now_iso(),
+        }
+        self._canonical_products[product_id] = row
+        return product_id
+
     def _find_latest_offer_for_same_listing(
         self, *, source: str, source_store_id: str, source_product_key: str, exclude_offer_id: str | None
     ) -> dict[str, Any] | None:
@@ -352,6 +393,55 @@ class ScraperAdminStore:
             return None
         candidates.sort(key=lambda item: (item["valid_from"], item["updated_at"]), reverse=True)
         return candidates[0]
+
+    def _find_or_create_canonical_from_offer(
+        self,
+        *,
+        source_product_name: str,
+        source_brand: str | None,
+        source_package_quantity: float | None,
+        source_package_unit: str | None,
+        category: str | None = None,
+    ) -> tuple[str, bool]:
+        normalized_name = _normalize_text(source_product_name)
+        normalized_brand = source_brand.strip().lower() if source_brand else None
+        norm_qty, norm_unit = _normalize_quantity(source_package_quantity, source_package_unit)
+
+        for product in self._canonical_products.values():
+            same_name = product.get("normalized_name") == normalized_name
+            same_brand = (product.get("brand") or "").strip().lower() == (
+                normalized_brand or ""
+            )
+            p_qty, p_unit = _normalize_quantity(
+                product.get("package_quantity"), product.get("package_unit")
+            )
+            same_size = (
+                norm_qty is None
+                or p_qty is None
+                or (
+                    abs(float(p_qty) - float(norm_qty)) < 1e-6
+                    and p_unit == norm_unit
+                )
+            )
+            if same_name and same_brand and same_size:
+                return (product["id"], False)
+
+        product_id = str(uuid.uuid4())
+        now_iso = self._utc_now_iso()
+        row = {
+            "id": product_id,
+            "name": source_product_name.strip(),
+            "normalized_name": normalized_name,
+            "brand": source_brand.strip() if source_brand else None,
+            "serial_number": None,
+            "package_quantity": norm_qty,
+            "package_unit": norm_unit,
+            "category": category.strip().lower() if category else None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        self._canonical_products[product_id] = row
+        return (product_id, True)
 
     def _classify_change(
         self,
@@ -760,6 +850,19 @@ class ScraperAdminStore:
                     source_package_quantity=record.package_quantity,
                     source_package_unit=record.package_unit,
                 )
+                if match.canonical_product_id is None:
+                    auto_catalog_id = self._ensure_auto_canonical_product(
+                        source_product_name=source_product_name,
+                        source_brand=None,
+                        source_package_quantity=record.package_quantity,
+                        source_package_unit=record.package_unit,
+                    )
+                    match = MatchResult(
+                        canonical_product_id=auto_catalog_id,
+                        confidence=0.95,
+                        reason="auto_catalog_seed",
+                        decision_source="rule",
+                    )
                 confidence = float(match.confidence) if match.confidence is not None else None
                 auto_accept_threshold = 0.90
                 require_review_no_match = bool(
@@ -773,6 +876,20 @@ class ScraperAdminStore:
                 )
                 if no_match and not require_review_no_match:
                     needs_review = False
+                    auto_catalog_id, created_catalog = self._find_or_create_canonical_from_offer(
+                        source_product_name=source_product_name,
+                        source_brand=None,
+                        source_package_quantity=record.package_quantity,
+                        source_package_unit=record.package_unit,
+                        category=None,
+                    )
+                    match = MatchResult(
+                        canonical_product_id=auto_catalog_id,
+                        confidence=0.85,
+                        reason="auto_catalog_seed_no_match",
+                        decision_source="rule",
+                    )
+                    confidence = 0.85
                 valid_from = record.date.isoformat()
                 offer_key = (
                     record.source,
@@ -837,6 +954,24 @@ class ScraperAdminStore:
                     "updated_at": self._utc_now_iso(),
                 }
                 self._offers[offer_id] = row
+
+                if no_match and not require_review_no_match and created_catalog:
+                    self._append_event(
+                        offer=row,
+                        event_type="CATALOG_AUTO_CREATED",
+                        actor_type="system",
+                        old_values=None,
+                        new_values={
+                            "canonical_product_id": match.canonical_product_id,
+                            "source_product_name": source_product_name,
+                            "source_package_quantity": record.package_quantity,
+                            "source_package_unit": _normalize_unit(record.package_unit),
+                        },
+                        decision_reason="auto_catalog_seed_no_match",
+                        rule_id="catalog.autocreate.no_match",
+                        confidence=confidence,
+                        comment="Created canonical product from no-match offer.",
+                    )
 
                 if needs_review:
                     review_count += 1
