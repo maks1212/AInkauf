@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from .database import Base, SessionLocal, engine
@@ -420,6 +420,16 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             session.commit()
         return stats
 
+    def reset_runtime_data(self) -> dict[str, int]:
+        in_mem = super().reset_runtime_data()
+        with SessionLocal() as session:
+            session.query(ScrapedOfferEvent).delete(synchronize_session=False)
+            session.query(ScrapedOfferReview).delete(synchronize_session=False)
+            session.query(ScrapedOffer).delete(synchronize_session=False)
+            session.query(ScraperJobRun).delete(synchronize_session=False)
+            session.commit()
+        return in_mem
+
     def list_offer_events(
         self,
         *,
@@ -538,6 +548,15 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             self._apply_offer_dict_to_row(row, offer_data)
         self._persist_reviews(session)
         self._persist_events(session)
+
+    def reset_data(self) -> None:
+        super().reset_data()
+        with SessionLocal() as session:
+            session.execute(delete(ScrapedOfferEvent))
+            session.execute(delete(ScrapedOfferReview))
+            session.execute(delete(ScrapedOffer))
+            session.execute(delete(ScraperJobRun))
+            session.commit()
 
     def seed_default_chains(self) -> None:
         defaults = [

@@ -769,6 +769,9 @@ def admin_update_config(payload: dict) -> dict:
         interval_minutes=payload.get("interval_minutes"),
         max_parallel_stores=payload.get("max_parallel_stores"),
         retries=payload.get("retries"),
+        require_manual_review_for_no_match=payload.get(
+            "require_manual_review_for_no_match"
+        ),
     )
     return {"config": config}
 
@@ -811,6 +814,12 @@ def admin_bootstrap_persistence() -> dict:
     scraper_admin_store.create_schema()
     scraper_admin_store.seed_default_chains()
     return {"bootstrapped": True}
+
+
+@app.post("/admin/scraper/reset")
+def admin_reset_scraper_data() -> dict:
+    scraper_admin_store.reset_data()
+    return {"reset": True}
 
 
 def _ui_params(

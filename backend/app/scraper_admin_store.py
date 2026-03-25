@@ -86,6 +86,7 @@ class ScraperAdminStore:
             "interval_minutes": 180,
             "max_parallel_stores": 4,
             "retries": 2,
+            "require_manual_review_for_no_match": False,
             "updated_at": self._utc_now_iso(),
         }
 
@@ -107,6 +108,7 @@ class ScraperAdminStore:
         interval_minutes: int | None = None,
         max_parallel_stores: int | None = None,
         retries: int | None = None,
+        require_manual_review_for_no_match: bool | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if enabled is not None:
@@ -117,6 +119,10 @@ class ScraperAdminStore:
                 self._config["max_parallel_stores"] = max(1, min(max_parallel_stores, 16))
             if retries is not None:
                 self._config["retries"] = max(0, min(retries, 5))
+            if require_manual_review_for_no_match is not None:
+                self._config["require_manual_review_for_no_match"] = (
+                    require_manual_review_for_no_match
+                )
             self._config["updated_at"] = self._utc_now_iso()
             return dict(self._config)
 
@@ -439,6 +445,24 @@ class ScraperAdminStore:
             bounded_limit = max(1, min(limit, 2000))
             return rows[bounded_offset : bounded_offset + bounded_limit]
 
+    def clear_all_data(self) -> dict[str, int]:
+        with self._lock:
+            counts = {
+                "offers": len(self._offers),
+                "reviews": len(self._reviews),
+                "events": len(self._events),
+                "jobs": len(self._jobs),
+                "catalog": len(self._canonical_products),
+            }
+            self._offers.clear()
+            self._offer_key_index.clear()
+            self._reviews.clear()
+            self._events.clear()
+            self._jobs.clear()
+            self._canonical_products.clear()
+            self._is_running = False
+            return counts
+
     def list_events(
         self,
         *,
@@ -728,11 +752,17 @@ class ScraperAdminStore:
                 )
                 confidence = float(match.confidence) if match.confidence is not None else None
                 auto_accept_threshold = 0.90
+                require_review_no_match = bool(
+                    self._config.get("require_manual_review_for_no_match", False)
+                )
+                no_match = match.canonical_product_id is None
                 needs_review = not (
                     match.canonical_product_id is not None
                     and confidence is not None
                     and confidence >= auto_accept_threshold
                 )
+                if no_match and not require_review_no_match:
+                    needs_review = False
                 valid_from = record.date.isoformat()
                 offer_key = (
                     record.source,
@@ -784,7 +814,7 @@ class ScraperAdminStore:
                     "valid_to": None,
                     "observed_at": observed.isoformat(),
                     "canonical_product_id": match.canonical_product_id if not needs_review else None,
-                    "mapping_confidence": confidence if not needs_review else confidence,
+                    "mapping_confidence": confidence,
                     "needs_review": needs_review,
                     "review_reason": match.reason if needs_review else None,
                     "promotion_type": None,
