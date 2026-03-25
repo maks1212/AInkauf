@@ -1,7 +1,14 @@
 import { Injectable, computed, effect, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ScraperAdminApiService } from '../../../core/api/scraper-admin-api.service';
-import { type CatalogItem, type ReviewItem, type ScrapedOffer, type ScraperConfig, type ScraperJob } from '../../../core/models/scraper-admin.models';
+import {
+  type CatalogItem,
+  type ReviewItem,
+  type ScrapedOffer,
+  type ScraperConfig,
+  type ScraperJob,
+  type ScheduleRecommendation,
+} from '../../../core/models/scraper-admin.models';
 
 @Injectable({ providedIn: 'root' })
 export class ScraperAdminStore {
@@ -14,7 +21,7 @@ export class ScraperAdminStore {
   readonly error = signal<string | null>(null);
 
   readonly config = signal<ScraperConfig | null>(null);
-  readonly recommendation = signal<Record<string, unknown> | null>(null);
+  readonly recommendation = signal<ScheduleRecommendation | null>(null);
   readonly jobs = signal<ScraperJob[]>([]);
   readonly offers = signal<ScrapedOffer[]>([]);
   readonly reviews = signal<ReviewItem[]>([]);
@@ -65,7 +72,7 @@ export class ScraperAdminStore {
     try {
       const [cfg, jobs, catalog] = await Promise.all([
         firstValueFrom(this.api.getConfig()),
-        firstValueFrom(this.api.getJobs()),
+        firstValueFrom(this.api.listJobs()),
         firstValueFrom(this.api.listCatalog()),
       ]);
       this.config.set(cfg.config);
@@ -88,7 +95,7 @@ export class ScraperAdminStore {
         .filter((value) => value.length > 0);
       await firstValueFrom(this.api.startJob({ stores, simulate }));
       this.notice.set('Scraper-Job gestartet.');
-      const jobs = await firstValueFrom(this.api.getJobs());
+      const jobs = await firstValueFrom(this.api.listJobs());
       this.jobs.set(jobs.items);
     });
   }
@@ -264,7 +271,7 @@ export class ScraperAdminStore {
     if (this.timer) return;
     this.timer = setInterval(async () => {
       try {
-        const jobs = await firstValueFrom(this.api.getJobs());
+        const jobs = await firstValueFrom(this.api.listJobs());
         this.jobs.set(jobs.items);
         await Promise.all([this.reloadOffers(), this.reloadReviews()]);
       } catch {
