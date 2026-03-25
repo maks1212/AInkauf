@@ -700,6 +700,25 @@ def admin_list_reviews(
     return {"items": scraper_admin_store.list_reviews(status=status, limit=limit)}
 
 
+@app.get("/admin/scraper/events")
+def admin_list_events(
+    offer_id: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    actor_type: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=2000),
+) -> dict:
+    return {
+        "items": scraper_admin_store.list_events(
+            offer_id=offer_id,
+            event_type=event_type,
+            actor_type=actor_type,
+            offset=offset,
+            limit=limit,
+        )
+    }
+
+
 @app.post("/admin/scraper/reviews/{review_id}/resolve")
 def admin_resolve_review(review_id: str, payload: dict) -> dict:
     canonical_product_id = payload.get("canonical_product_id")
@@ -716,6 +735,23 @@ def admin_resolve_review(review_id: str, payload: dict) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/admin/scraper/offers/{offer_id}/events")
+def admin_offer_events(
+    offer_id: str,
+    event_type: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> dict:
+    return {
+        "items": scraper_admin_store.list_offer_events(
+            offer_id=offer_id,
+            event_type=event_type,
+            offset=offset,
+            limit=limit,
+        )
+    }
 
 
 @app.get("/admin/scraper/config")

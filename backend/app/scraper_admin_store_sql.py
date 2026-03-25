@@ -12,6 +12,7 @@ from .providers.austria_price_provider import PriceRecord
 from .scraper_admin_models import (
     CanonicalProductCatalog,
     ScrapedOffer,
+    ScrapedOfferEvent,
     ScrapedOfferReview,
     ScraperChain,
     ScraperJobRun,
@@ -25,9 +26,10 @@ def _utc_now() -> datetime:
 
 class ScraperAdminSqlStore(ScraperAdminStore):
     """
-    SQL-backed store that preserves the in-memory store interface.
-    Config and minimal scheduler state stay in-process for now;
-    catalog/offers/reviews/jobs are persisted.
+    SQL-backed store that preserves the in-memory store behavior.
+    Strategy:
+    - Use parent logic for matching/classification/decision/events
+    - Persist in-memory state snapshots into SQL for API consumption
     """
 
     def create_schema(self) -> None:
@@ -40,9 +42,7 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             "normalized_name": row.normalized_name,
             "brand": row.brand,
             "serial_number": row.serial_number,
-            "package_quantity": float(row.package_quantity)
-            if row.package_quantity is not None
-            else None,
+            "package_quantity": float(row.package_quantity) if row.package_quantity is not None else None,
             "package_unit": row.package_unit,
             "category": row.category,
             "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -60,9 +60,7 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             "source_product_name": row.source_product_name,
             "source_brand": row.source_brand,
             "source_category": row.source_category,
-            "source_package_quantity": float(row.source_package_quantity)
-            if row.source_package_quantity is not None
-            else None,
+            "source_package_quantity": float(row.source_package_quantity) if row.source_package_quantity is not None else None,
             "source_package_unit": row.source_package_unit,
             "price_eur": float(row.price_eur),
             "currency": row.currency,
@@ -70,16 +68,15 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             "valid_from": row.valid_from.isoformat(),
             "valid_to": row.valid_to.isoformat() if row.valid_to else None,
             "observed_at": row.observed_at.isoformat(),
-            "canonical_product_id": str(row.canonical_product_id)
-            if row.canonical_product_id
-            else None,
-            "mapping_confidence": float(row.mapping_confidence)
-            if row.mapping_confidence is not None
-            else None,
+            "canonical_product_id": str(row.canonical_product_id) if row.canonical_product_id else None,
+            "mapping_confidence": float(row.mapping_confidence) if row.mapping_confidence is not None else None,
             "needs_review": row.needs_review,
             "review_reason": row.review_reason,
             "promotion_type": row.promotion_type,
             "promotion_label": row.promotion_label,
+            "change_type": row.change_type,
+            "decision_source": row.decision_source,
+            "decision_reason": row.decision_reason,
             "raw_payload": row.raw_payload,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -92,9 +89,7 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             "status": row.status,
             "review_reason": None,
             "reviewer_note": row.reviewer_note,
-            "resolved_canonical_product_id": str(row.resolved_canonical_product_id)
-            if row.resolved_canonical_product_id
-            else None,
+            "resolved_canonical_product_id": str(row.resolved_canonical_product_id) if row.resolved_canonical_product_id else None,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -117,11 +112,26 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             "details": row.details or {},
         }
 
+    def _row_to_event(self, row: ScrapedOfferEvent) -> dict[str, Any]:
+        return {
+            "id": str(row.id),
+            "scraped_offer_id": str(row.scraped_offer_id),
+            "ingestion_run_id": str(row.ingestion_run_id) if row.ingestion_run_id else None,
+            "event_type": row.event_type,
+            "actor_type": row.actor_type,
+            "actor_id": row.actor_id,
+            "old_values": row.old_values,
+            "new_values": row.new_values,
+            "decision_reason": row.decision_reason,
+            "rule_id": row.rule_id,
+            "confidence": float(row.confidence) if row.confidence is not None else None,
+            "comment": row.comment,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
     def list_canonical_products(self) -> list[dict[str, Any]]:
         with SessionLocal() as session:
-            rows = session.scalars(
-                select(CanonicalProductCatalog).order_by(CanonicalProductCatalog.created_at.desc())
-            ).all()
+            rows = session.scalars(select(CanonicalProductCatalog).order_by(CanonicalProductCatalog.created_at.desc())).all()
             return [self._row_to_product(row) for row in rows]
 
     def create_canonical_product(
@@ -134,21 +144,26 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         package_unit: str | None,
         category: str | None,
     ) -> dict[str, Any]:
-        normalized_name = " ".join(
-            name.strip().lower().replace("_", " ").replace("-", " ").split()
+        created = super().create_canonical_product(
+            name=name,
+            brand=brand,
+            serial_number=serial_number,
+            package_quantity=package_quantity,
+            package_unit=package_unit,
+            category=category,
         )
         with SessionLocal() as session:
             row = CanonicalProductCatalog(
-                id=uuid.uuid4(),
-                serial_number=serial_number.strip() if serial_number else None,
-                name=name.strip(),
-                normalized_name=normalized_name,
-                brand=brand.strip() if brand else None,
-                category=category.strip().lower() if category else None,
-                package_quantity=package_quantity,
-                package_unit=package_unit.strip().lower() if package_unit else None,
-                created_at=_utc_now(),
-                updated_at=_utc_now(),
+                id=uuid.UUID(created["id"]),
+                serial_number=created.get("serial_number"),
+                name=created["name"],
+                normalized_name=created["normalized_name"],
+                brand=created.get("brand"),
+                category=created.get("category"),
+                package_quantity=created.get("package_quantity"),
+                package_unit=created.get("package_unit"),
+                created_at=datetime.fromisoformat(created["created_at"]),
+                updated_at=datetime.fromisoformat(created["updated_at"]),
             )
             session.add(row)
             try:
@@ -170,26 +185,27 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         package_unit: str | None = None,
         category: str | None = None,
     ) -> dict[str, Any]:
+        updated = super().update_canonical_product(
+            product_id=product_id,
+            name=name,
+            brand=brand,
+            serial_number=serial_number,
+            package_quantity=package_quantity,
+            package_unit=package_unit,
+            category=category,
+        )
         with SessionLocal() as session:
             row = session.get(CanonicalProductCatalog, uuid.UUID(product_id))
             if row is None:
                 raise KeyError("canonical product not found")
-            if name is not None:
-                row.name = name.strip()
-                row.normalized_name = " ".join(
-                    name.strip().lower().replace("_", " ").replace("-", " ").split()
-                )
-            if brand is not None:
-                row.brand = brand.strip() if brand else None
-            if serial_number is not None:
-                row.serial_number = serial_number.strip() if serial_number else None
-            if package_quantity is not None:
-                row.package_quantity = package_quantity
-            if package_unit is not None:
-                row.package_unit = package_unit.strip().lower() if package_unit else None
-            if category is not None:
-                row.category = category.strip().lower() if category else None
-            row.updated_at = _utc_now()
+            row.name = updated["name"]
+            row.normalized_name = updated["normalized_name"]
+            row.brand = updated.get("brand")
+            row.serial_number = updated.get("serial_number")
+            row.package_quantity = updated.get("package_quantity")
+            row.package_unit = updated.get("package_unit")
+            row.category = updated.get("category")
+            row.updated_at = datetime.fromisoformat(updated["updated_at"])
             try:
                 session.commit()
             except IntegrityError as exc:
@@ -199,12 +215,14 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             return self._row_to_product(row)
 
     def delete_canonical_product(self, product_id: str) -> None:
+        super().delete_canonical_product(product_id)
         with SessionLocal() as session:
             row = session.get(CanonicalProductCatalog, uuid.UUID(product_id))
             if row is None:
                 raise KeyError("canonical product not found")
             session.delete(row)
             session.commit()
+            self._persist_offer_review_event_snapshots(session)
 
     def list_offers(
         self,
@@ -233,46 +251,38 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         needs_review: bool | None = None,
         review_reason: str | None = None,
     ) -> dict[str, Any]:
+        updated = super().update_offer(
+            offer_id=offer_id,
+            price_eur=price_eur,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            price_type=price_type,
+            promotion_type=promotion_type,
+            promotion_label=promotion_label,
+            canonical_product_id=canonical_product_id,
+            needs_review=needs_review,
+            review_reason=review_reason,
+        )
         with SessionLocal() as session:
             row = session.get(ScrapedOffer, uuid.UUID(offer_id))
             if row is None:
                 raise KeyError("offer not found")
-            if price_eur is not None:
-                row.price_eur = price_eur
-            if valid_from is not None:
-                row.valid_from = datetime.fromisoformat(valid_from).date()
-            if valid_to is not None:
-                row.valid_to = datetime.fromisoformat(valid_to).date() if valid_to else None
-            if price_type is not None:
-                row.price_type = price_type
-            if promotion_type is not None:
-                row.promotion_type = promotion_type
-            if promotion_label is not None:
-                row.promotion_label = promotion_label
-            if canonical_product_id is not None:
-                row.canonical_product_id = (
-                    uuid.UUID(canonical_product_id) if canonical_product_id else None
-                )
-                if canonical_product_id:
-                    row.mapping_confidence = 1.0
-                    row.needs_review = False
-                    row.review_reason = None
-            if needs_review is not None:
-                row.needs_review = needs_review
-            if review_reason is not None:
-                row.review_reason = review_reason
-            row.updated_at = _utc_now()
+            self._apply_offer_dict_to_row(row, updated)
             session.commit()
+            self._persist_reviews(session)
+            self._persist_events(session)
             session.refresh(row)
             return self._row_to_offer(row)
 
     def delete_offer(self, offer_id: str) -> None:
+        super().delete_offer(offer_id)
         with SessionLocal() as session:
             row = session.get(ScrapedOffer, uuid.UUID(offer_id))
             if row is None:
                 raise KeyError("offer not found")
             session.delete(row)
             session.commit()
+            self._persist_events(session)
 
     def list_reviews(self, *, status: str = "pending", limit: int = 200) -> list[dict[str, Any]]:
         with SessionLocal() as session:
@@ -289,6 +299,11 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         canonical_product_id: str,
         reviewer_note: str | None,
     ) -> dict[str, Any]:
+        updated_review = super().resolve_review(
+            review_id=review_id,
+            canonical_product_id=canonical_product_id,
+            reviewer_note=reviewer_note,
+        )
         with SessionLocal() as session:
             review = session.get(ScrapedOfferReview, uuid.UUID(review_id))
             if review is None:
@@ -296,24 +311,24 @@ class ScraperAdminSqlStore(ScraperAdminStore):
             offer = session.get(ScrapedOffer, review.scraped_offer_id)
             if offer is None:
                 raise KeyError("offer for review not found")
-            canonical_uuid = uuid.UUID(canonical_product_id)
-            canonical = session.get(CanonicalProductCatalog, canonical_uuid)
-            if canonical is None:
-                raise ValueError("canonical_product_id not found")
-
-            offer.canonical_product_id = canonical_uuid
-            offer.mapping_confidence = 1.0
-            offer.needs_review = False
-            offer.review_reason = None
-            offer.updated_at = _utc_now()
-
-            review.status = "resolved"
-            review.reviewer_note = reviewer_note
-            review.resolved_canonical_product_id = canonical_uuid
-            review.resolved_at = _utc_now()
-            review.updated_at = _utc_now()
-
+            latest_offer_dict = self._offers.get(str(offer.id))
+            if latest_offer_dict:
+                self._apply_offer_dict_to_row(offer, latest_offer_dict)
+            review.status = updated_review["status"]
+            review.reviewer_note = updated_review.get("reviewer_note")
+            review.resolved_canonical_product_id = (
+                uuid.UUID(updated_review["resolved_canonical_product_id"])
+                if updated_review.get("resolved_canonical_product_id")
+                else None
+            )
+            review.resolved_at = (
+                datetime.fromisoformat(updated_review["resolved_at"])
+                if updated_review.get("resolved_at")
+                else None
+            )
+            review.updated_at = datetime.fromisoformat(updated_review["updated_at"])
             session.commit()
+            self._persist_events(session)
             session.refresh(review)
             return self._row_to_review(review)
 
@@ -326,23 +341,19 @@ class ScraperAdminSqlStore(ScraperAdminStore):
 
     def is_running(self) -> bool:
         with SessionLocal() as session:
-            active = session.scalars(
-                select(ScraperJobRun).where(ScraperJobRun.status == "running").limit(1)
-            ).first()
+            active = session.scalars(select(ScraperJobRun).where(ScraperJobRun.status == "running").limit(1)).first()
             return active is not None
 
     def start_job(self, *, source: str, stores: list[str]) -> dict[str, Any]:
+        in_mem_job = super().start_job(source=source, stores=stores)
         with SessionLocal() as session:
-            active = session.scalars(
-                select(ScraperJobRun).where(ScraperJobRun.status == "running").limit(1)
-            ).first()
+            active = session.scalars(select(ScraperJobRun).where(ScraperJobRun.status == "running").limit(1)).first()
             if active is not None:
                 raise RuntimeError("scraper job is already running")
-
             row = ScraperJobRun(
-                id=uuid.uuid4(),
+                id=uuid.UUID(in_mem_job["id"]),
                 source=source,
-                started_at=_utc_now(),
+                started_at=datetime.fromisoformat(in_mem_job["started_at"]),
                 status="running",
                 store_count=len(stores),
                 record_count=0,
@@ -369,19 +380,30 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         error_count: int,
         details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        in_mem_job = super().finish_job(
+            job_id=job_id,
+            status=status,
+            record_count=record_count,
+            inserted_count=inserted_count,
+            matched_count=matched_count,
+            review_count=review_count,
+            error_count=error_count,
+            details=details,
+        )
         with SessionLocal() as session:
             row = session.get(ScraperJobRun, uuid.UUID(job_id))
             if row is None:
                 raise KeyError("job not found")
-            row.status = status
-            row.finished_at = _utc_now()
-            row.record_count = record_count
-            row.inserted_count = inserted_count
-            row.matched_count = matched_count
-            row.review_count = review_count
-            row.error_count = error_count
-            row.details = details or {}
+            row.status = in_mem_job["status"]
+            row.finished_at = datetime.fromisoformat(in_mem_job["finished_at"]) if in_mem_job.get("finished_at") else None
+            row.record_count = in_mem_job["record_count"]
+            row.inserted_count = in_mem_job["inserted_count"]
+            row.matched_count = in_mem_job["matched_count"]
+            row.review_count = in_mem_job["review_count"]
+            row.error_count = in_mem_job["error_count"]
+            row.details = in_mem_job.get("details") or {}
             session.commit()
+            self._persist_offer_review_event_snapshots(session)
             session.refresh(row)
             return self._row_to_job(row)
 
@@ -392,124 +414,130 @@ class ScraperAdminSqlStore(ScraperAdminStore):
         records: list[PriceRecord],
         observed_at: datetime | None = None,
     ) -> dict[str, int]:
-        # Reuse matching and decision logic from parent in-memory structure,
-        # then persist rows into SQL store for now.
-        # This keeps behavior aligned while we incrementally move matching to SQL queries.
-        stats = super().ingest_records(
-            job_id=job_id,
-            records=records,
-            observed_at=observed_at,
-        )
+        stats = super().ingest_records(job_id=job_id, records=records, observed_at=observed_at)
         with SessionLocal() as session:
-            # Persist canonical products currently held in-memory cache.
-            for product in self._canonical_products.values():
-                product_uuid = uuid.UUID(product["id"])
-                exists = session.get(CanonicalProductCatalog, product_uuid)
-                if exists:
-                    continue
-                session.add(
-                    CanonicalProductCatalog(
-                        id=product_uuid,
-                        serial_number=product.get("serial_number"),
-                        name=product["name"],
-                        normalized_name=product["normalized_name"],
-                        brand=product.get("brand"),
-                        category=product.get("category"),
-                        package_quantity=product.get("package_quantity"),
-                        package_unit=product.get("package_unit"),
-                        created_at=datetime.fromisoformat(product["created_at"]),
-                        updated_at=datetime.fromisoformat(product["updated_at"]),
-                    )
-                )
-
-            for offer in self._offers.values():
-                offer_uuid = uuid.UUID(offer["id"])
-                exists = session.get(ScrapedOffer, offer_uuid)
-                if exists:
-                    exists.price_eur = offer["price_eur"]
-                    exists.valid_from = datetime.fromisoformat(offer["valid_from"]).date()
-                    exists.valid_to = (
-                        datetime.fromisoformat(offer["valid_to"]).date()
-                        if offer["valid_to"]
-                        else None
-                    )
-                    exists.canonical_product_id = (
-                        uuid.UUID(offer["canonical_product_id"])
-                        if offer["canonical_product_id"]
-                        else None
-                    )
-                    exists.mapping_confidence = offer["mapping_confidence"]
-                    exists.needs_review = offer["needs_review"]
-                    exists.review_reason = offer["review_reason"]
-                    exists.updated_at = datetime.fromisoformat(offer["updated_at"])
-                    continue
-
-                session.add(
-                    ScrapedOffer(
-                        id=offer_uuid,
-                        ingestion_run_id=uuid.UUID(job_id),
-                        source=offer["source"],
-                        source_store_id=offer["source_store_id"],
-                        source_product_key=offer["source_product_key"],
-                        source_serial_number=offer["source_serial_number"],
-                        source_product_name=offer["source_product_name"],
-                        source_brand=offer["source_brand"],
-                        source_category=offer["source_category"],
-                        source_package_quantity=offer["source_package_quantity"],
-                        source_package_unit=offer["source_package_unit"],
-                        price_eur=offer["price_eur"],
-                        currency=offer["currency"],
-                        price_type=offer["price_type"],
-                        valid_from=datetime.fromisoformat(offer["valid_from"]).date(),
-                        valid_to=(
-                            datetime.fromisoformat(offer["valid_to"]).date()
-                            if offer["valid_to"]
-                            else None
-                        ),
-                        observed_at=datetime.fromisoformat(offer["observed_at"]),
-                        canonical_product_id=(
-                            uuid.UUID(offer["canonical_product_id"])
-                            if offer["canonical_product_id"]
-                            else None
-                        ),
-                        mapping_confidence=offer["mapping_confidence"],
-                        needs_review=offer["needs_review"],
-                        review_reason=offer["review_reason"],
-                        promotion_type=offer["promotion_type"],
-                        promotion_label=offer["promotion_label"],
-                        raw_payload=offer["raw_payload"],
-                        created_at=datetime.fromisoformat(offer["created_at"]),
-                        updated_at=datetime.fromisoformat(offer["updated_at"]),
-                    )
-                )
-
-            for review in self._reviews.values():
-                review_uuid = uuid.UUID(review["id"])
-                exists = session.get(ScrapedOfferReview, review_uuid)
-                if exists:
-                    continue
-                session.add(
-                    ScrapedOfferReview(
-                        id=review_uuid,
-                        scraped_offer_id=uuid.UUID(review["scraped_offer_id"]),
-                        status=review["status"],
-                        reviewer_note=review["reviewer_note"],
-                        resolved_canonical_product_id=(
-                            uuid.UUID(review["resolved_canonical_product_id"])
-                            if review["resolved_canonical_product_id"]
-                            else None
-                        ),
-                        created_at=datetime.fromisoformat(review["created_at"]),
-                        resolved_at=(
-                            datetime.fromisoformat(review["resolved_at"])
-                            if review["resolved_at"]
-                            else None
-                        ),
-                        updated_at=datetime.fromisoformat(review["updated_at"]),
-                    )
-                )
+            self._persist_offer_review_event_snapshots(session)
             session.commit()
         return stats
+
+    def list_offer_events(
+        self,
+        *,
+        offer_id: str | None = None,
+        event_type: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with SessionLocal() as session:
+            stmt = select(ScrapedOfferEvent).order_by(ScrapedOfferEvent.created_at.desc())
+            if offer_id:
+                stmt = stmt.where(ScrapedOfferEvent.scraped_offer_id == uuid.UUID(offer_id))
+            if event_type:
+                stmt = stmt.where(ScrapedOfferEvent.event_type == event_type)
+            rows = session.scalars(stmt.offset(max(0, offset)).limit(max(1, min(limit, 2000)))).all()
+            return [self._row_to_event(row) for row in rows]
+
+    def list_events(
+        self,
+        *,
+        offer_id: str | None = None,
+        event_type: str | None = None,
+        actor_type: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with SessionLocal() as session:
+            stmt = select(ScrapedOfferEvent).order_by(ScrapedOfferEvent.created_at.desc())
+            if offer_id:
+                stmt = stmt.where(ScrapedOfferEvent.scraped_offer_id == uuid.UUID(offer_id))
+            if event_type:
+                stmt = stmt.where(ScrapedOfferEvent.event_type == event_type)
+            if actor_type:
+                stmt = stmt.where(ScrapedOfferEvent.actor_type == actor_type)
+            rows = session.scalars(stmt.offset(max(0, offset)).limit(max(1, min(limit, 2000)))).all()
+            return [self._row_to_event(row) for row in rows]
+
+    def _apply_offer_dict_to_row(self, row: ScrapedOffer, data: dict[str, Any]) -> None:
+        row.ingestion_run_id = uuid.UUID(data["ingestion_run_id"]) if data.get("ingestion_run_id") else None
+        row.source = data["source"]
+        row.source_store_id = data["source_store_id"]
+        row.source_product_key = data["source_product_key"]
+        row.source_serial_number = data.get("source_serial_number")
+        row.source_product_name = data["source_product_name"]
+        row.source_brand = data.get("source_brand")
+        row.source_category = data.get("source_category")
+        row.source_package_quantity = data.get("source_package_quantity")
+        row.source_package_unit = data.get("source_package_unit")
+        row.price_eur = data["price_eur"]
+        row.currency = data.get("currency", "EUR")
+        row.price_type = data.get("price_type", "regular")
+        row.valid_from = datetime.fromisoformat(data["valid_from"]).date()
+        row.valid_to = datetime.fromisoformat(data["valid_to"]).date() if data.get("valid_to") else None
+        row.observed_at = datetime.fromisoformat(data["observed_at"])
+        row.canonical_product_id = uuid.UUID(data["canonical_product_id"]) if data.get("canonical_product_id") else None
+        row.mapping_confidence = data.get("mapping_confidence")
+        row.needs_review = bool(data.get("needs_review", False))
+        row.review_reason = data.get("review_reason")
+        row.promotion_type = data.get("promotion_type")
+        row.promotion_label = data.get("promotion_label")
+        row.change_type = data.get("change_type")
+        row.decision_source = data.get("decision_source")
+        row.decision_reason = data.get("decision_reason")
+        row.raw_payload = data.get("raw_payload")
+        row.created_at = datetime.fromisoformat(data["created_at"])
+        row.updated_at = datetime.fromisoformat(data["updated_at"])
+
+    def _persist_reviews(self, session) -> None:
+        for review_data in self._reviews.values():
+            review_uuid = uuid.UUID(review_data["id"])
+            row = session.get(ScrapedOfferReview, review_uuid)
+            if row is None:
+                row = ScrapedOfferReview(id=review_uuid)
+                session.add(row)
+            row.scraped_offer_id = uuid.UUID(review_data["scraped_offer_id"])
+            row.status = review_data["status"]
+            row.reviewer_note = review_data.get("reviewer_note")
+            row.resolved_canonical_product_id = (
+                uuid.UUID(review_data["resolved_canonical_product_id"])
+                if review_data.get("resolved_canonical_product_id")
+                else None
+            )
+            row.created_at = datetime.fromisoformat(review_data["created_at"])
+            row.resolved_at = datetime.fromisoformat(review_data["resolved_at"]) if review_data.get("resolved_at") else None
+            row.updated_at = datetime.fromisoformat(review_data["updated_at"])
+
+    def _persist_events(self, session) -> None:
+        for event_data in self._events.values():
+            event_uuid = uuid.UUID(event_data["id"])
+            row = session.get(ScrapedOfferEvent, event_uuid)
+            if row is None:
+                row = ScrapedOfferEvent(id=event_uuid)
+                session.add(row)
+            row.scraped_offer_id = uuid.UUID(event_data["scraped_offer_id"])
+            row.ingestion_run_id = (
+                uuid.UUID(event_data["ingestion_run_id"]) if event_data.get("ingestion_run_id") else None
+            )
+            row.event_type = event_data["event_type"]
+            row.actor_type = event_data["actor_type"]
+            row.actor_id = event_data.get("actor_id")
+            row.old_values = event_data.get("old_values")
+            row.new_values = event_data.get("new_values")
+            row.decision_reason = event_data.get("decision_reason")
+            row.rule_id = event_data.get("rule_id")
+            row.confidence = event_data.get("confidence")
+            row.comment = event_data.get("comment")
+            row.created_at = datetime.fromisoformat(event_data["created_at"])
+
+    def _persist_offer_review_event_snapshots(self, session) -> None:
+        for offer_data in self._offers.values():
+            offer_uuid = uuid.UUID(offer_data["id"])
+            row = session.get(ScrapedOffer, offer_uuid)
+            if row is None:
+                row = ScrapedOffer(id=offer_uuid)
+                session.add(row)
+            self._apply_offer_dict_to_row(row, offer_data)
+        self._persist_reviews(session)
+        self._persist_events(session)
 
     def seed_default_chains(self) -> None:
         defaults = [

@@ -149,3 +149,62 @@ def test_scraper_admin_config_validation_and_recommendation():
     assert config["interval_minutes"] == 45
     assert config["max_parallel_stores"] == 5
     assert config["retries"] == 2
+
+
+def test_scraper_admin_events_are_recorded_for_auto_and_manual_decisions():
+    catalog_create = client.post(
+        "/admin/scraper/catalog",
+        json={
+            "name": "Pizza Margherita",
+            "brand": "Clever",
+            "serial_number": "9020000000001",
+            "package_quantity": 1,
+            "package_unit": "stk",
+            "category": "pizza",
+        },
+    )
+    assert catalog_create.status_code == 200
+    canonical_id = catalog_create.json()["item"]["id"]
+
+    start_response = client.post(
+        "/admin/scraper/jobs/start",
+        json={"stores": ["billa"], "simulate": True},
+    )
+    assert start_response.status_code == 200
+    job_id = start_response.json()["job"]["id"]
+
+    # Wait for async simulated job completion.
+    for _ in range(30):
+        jobs_response = client.get("/admin/scraper/jobs")
+        assert jobs_response.status_code == 200
+        jobs = jobs_response.json()["items"]
+        current = next((row for row in jobs if row["id"] == job_id), None)
+        if current and current["status"] in {"success", "failed"}:
+            break
+
+    events_response = client.get("/admin/scraper/events", params={"event_type": "MATCHED_AUTO"})
+    assert events_response.status_code == 200
+    auto_events = events_response.json()["items"]
+    assert auto_events
+
+    review_events = client.get("/admin/scraper/events", params={"event_type": "REVIEW_REQUIRED"})
+    assert review_events.status_code == 200
+    review_items = review_events.json()["items"]
+    assert review_items
+
+    pending_reviews = client.get("/admin/scraper/reviews", params={"status": "pending"})
+    assert pending_reviews.status_code == 200
+    pending = pending_reviews.json()["items"]
+    assert pending
+    review_id = pending[0]["id"]
+
+    resolve_response = client.post(
+        f"/admin/scraper/reviews/{review_id}/resolve",
+        json={"canonical_product_id": canonical_id, "reviewer_note": "event test"},
+    )
+    assert resolve_response.status_code == 200
+
+    resolved_events = client.get("/admin/scraper/events", params={"event_type": "REVIEW_RESOLVED"})
+    assert resolved_events.status_code == 200
+    items = resolved_events.json()["items"]
+    assert items

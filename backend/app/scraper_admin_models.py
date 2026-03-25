@@ -122,6 +122,9 @@ class ScrapedOffer(Base):
     review_reason: Mapped[str | None] = mapped_column(Text)
     promotion_type: Mapped[str | None] = mapped_column(String(40))
     promotion_label: Mapped[str | None] = mapped_column(String(255))
+    change_type: Mapped[str | None] = mapped_column(String(40), index=True)
+    decision_source: Mapped[str | None] = mapped_column(String(20))
+    decision_reason: Mapped[str | None] = mapped_column(Text)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -144,3 +147,30 @@ class ScrapedOfferReview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ScrapedOfferEvent(Base):
+    __tablename__ = "scraped_offer_event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scraped_offer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scraped_offer.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ingestion_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("scraper_job_run.id", ondelete="SET NULL"),
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    actor_type: Mapped[str] = mapped_column(String(20), nullable=False, default="system")
+    actor_id: Mapped[str | None] = mapped_column(String(120))
+    old_values: Mapped[dict | None] = mapped_column(JSONB)
+    new_values: Mapped[dict | None] = mapped_column(JSONB)
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    rule_id: Mapped[str | None] = mapped_column(String(80))
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4))
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True
+    )
