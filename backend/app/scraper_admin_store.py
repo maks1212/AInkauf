@@ -480,6 +480,16 @@ class ScraperAdminStore:
             offset=offset,
         )
 
+    def reset_data(self) -> None:
+        with self._lock:
+            self._canonical_products.clear()
+            self._offers.clear()
+            self._offer_key_index.clear()
+            self._reviews.clear()
+            self._events.clear()
+            self._jobs.clear()
+            self._is_running = False
+
     # ----------------------------
     # Offers + review queue
     # ----------------------------
